@@ -1,0 +1,11 @@
+python-dotenv
+MetaTrader5
+pandas
+numpy
+scikit-learn
+joblib
+ta
+torch
+transformers
+accelerate
+huggingface_hub
