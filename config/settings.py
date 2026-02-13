@@ -42,3 +42,8 @@ TRAIN_TEST_SPLIT = 0.8
 
 # Model Settings
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "scalper_v1.pkl")
+
+# Lag-Llama Settings
+USE_LAG_LLAMA = os.getenv("USE_LAG_LLAMA", "True").lower() == "true"
+LAG_LLAMA_CHECKPOINT = os.getenv("LAG_LLAMA_CHECKPOINT", "time-series-foundation-models/Lag-Llama")
+LAG_LLAMA_REPO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vendor", "lag-llama")

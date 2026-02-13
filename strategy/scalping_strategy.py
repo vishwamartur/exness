@@ -13,7 +13,7 @@ from config import settings
 from data import loader
 from strategy import features
 
-# Try importing HF Predictor
+# Try importing HF Predictor and Lag-Llama
 try:
     from strategy.hf_predictor import HFPredictor
     HF_AVAILABLE = True
@@ -23,6 +23,17 @@ except ImportError:
 except Exception as e:
     HF_AVAILABLE = False
     print(f"Error loading HF Predictor: {e}")
+
+try:
+    from strategy.lag_llama_predictor import get_lag_llama_predictor
+    LAG_LLAMA_AVAILABLE = True
+    print("LagLlamaPredictor module found.")
+except ImportError:
+    LAG_LLAMA_AVAILABLE = False
+    print("LagLlamaPredictor module not found.")
+except Exception as e:
+    LAG_LLAMA_AVAILABLE = False
+    print(f"Error loading LagLlamaPredictor: {e}")
 
 class ScalpingStrategy:
     def __init__(self, mt5_client):
@@ -34,7 +45,19 @@ class ScalpingStrategy:
         # Cooldown State
         self.last_trade_time = {} # Symbol -> timestamp
         
-        if HF_AVAILABLE:
+        if settings.USE_LAG_LLAMA:
+            if LAG_LLAMA_AVAILABLE:
+                try:
+                    print("Initializing Lag-Llama...")
+                    self.hf_predictor = get_lag_llama_predictor(settings)
+                    print("Lag-Llama initialized.")
+                except Exception as e:
+                     print(f"Failed to init Lag-Llama: {e}")
+                     self.hf_predictor = None
+            else:
+                 print("Lag-Llama enabled in settings but module not available.")
+        
+        elif HF_AVAILABLE: # Fallback to Chronos if Lag-Llama not used/available
             try:
                 self.hf_predictor = HFPredictor("amazon/chronos-t5-tiny")
             except Exception as e:

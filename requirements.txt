@@ -9,3 +9,8 @@ torch
 transformers
 accelerate
 huggingface_hub
+gluonts
+scipy
+ujson
+aiohttp
+tqdm
