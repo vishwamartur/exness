@@ -58,15 +58,19 @@ class LagLlamaPredictor:
             # Ideally we should recover the exact lags_seq from the checkpoint, but unpickling failed.
             # For now, we use a range. This might degrade performance if lags are specific (e.g. exponential).
             # But getting it to load is step 1.
-            lags_seq = list(range(1, 505)) 
+            # Correct configuration matching the checkpoint
+            # Checkpoint trained with ["Q", "M", "W", "D", "H", "T", "S"] which yields 84 unique lags.
+            # 84 lags + 2 static + 6 time features = 92 input features.
+            # Layers = 8 (based on missing keys from checkpoint)
+            lags_seq = ["Q", "M", "W", "D", "H", "T", "S"]
 
             estimator = LagLlamaEstimator(
                 prediction_length=self.prediction_length,
                 context_length=self.context_length,
                 
-                # Parameters matching the checkpoint (deduced from size 28MB and shape [144, 512])
-                n_layer=32, # Assumed
-                n_head=4,   # 4 * 36 = 144
+                # Parameters matching the checkpoint
+                n_layer=8, 
+                n_head=4,
                 n_embd_per_head=36,
                 lags_seq=lags_seq,
                 time_feat=True,
@@ -196,7 +200,7 @@ class LagLlamaPredictor:
             median = f.quantile(0.5) # Shape (prediction_length,)
             results.append(median)
             
-        return torch.tensor(results).to(self.device) # Shape (batch, prediction_length)
+        return torch.tensor(np.array(results)).to(self.device) # Shape (batch, prediction_length)
         
     
 def get_lag_llama_predictor(settings):

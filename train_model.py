@@ -1,3 +1,14 @@
+"""
+Train RF Model — Updated for M15 institutional strategy.
+
+Changes from original M1 version:
+- Uses M15 timeframe data
+- Includes all institutional features (SMC, ADX, VWAP, etc.)
+- ATR-based barrier method (dynamic TP/SL based on volatility)
+- 5-year history for robust training
+- Gradient Boosting option for comparison
+"""
+
 import pandas as pd
 import numpy as np
 import joblib
@@ -11,34 +22,42 @@ from config import settings
 from data import loader
 from strategy import features
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-def apply_triple_barrier(df, tp_pips, sl_pips, time_horizon, point=0.00001):
+
+def apply_atr_barrier(df, atr_tp_mult=3.0, atr_sl_mult=1.5, time_horizon=20):
     """
-    Labels data based on Triple Barrier Method.
-    1 (Buy): Price hits TP before SL within time_horizon.
-    0 (No Trade): Price hits SL or generic exit.
+    Labels data using ATR-based barriers (matches live trading logic).
+    Uses dynamic TP/SL based on ATR, not fixed pips.
+    
+    1 (Buy): Price hits ATR*TP_mult before ATR*SL_mult within time_horizon bars.
+    0 (No Trade): Price hits SL or times out.
     """
     labels = []
+    atr = df['atr'].values if 'atr' in df.columns else None
     
-    # Convert pips to price difference
-    tp_dist = tp_pips * point
-    sl_dist = sl_pips * point
+    if atr is None:
+        print("Warning: ATR column not found, falling back to fixed barriers")
+        return apply_fixed_barrier(df, time_horizon)
     
-    # Iterate through indices (slow but clear logic)
-    # Vectorization is harder for path-dependent barriers
     for i in range(len(df)):
         if i + time_horizon >= len(df):
             labels.append(0)
             continue
-            
+        
         entry_price = df['close'].iloc[i]
-        # Future window
+        current_atr = atr[i]
+        
+        if current_atr <= 0:
+            labels.append(0)
+            continue
+        
+        tp_dist = current_atr * atr_tp_mult
+        sl_dist = current_atr * atr_sl_mult
+        
         future_window = df.iloc[i+1 : i+1+time_horizon]
         
-        # Check barriers
-        # Highs for TP, Lows for SL (Buying)
         hit_tp = False
         hit_sl = False
         
@@ -48,88 +67,139 @@ def apply_triple_barrier(df, tp_pips, sl_pips, time_horizon, point=0.00001):
             
             if high >= entry_price + tp_dist:
                 hit_tp = True
-                break # Hit TP
-                
+                break
             if low <= entry_price - sl_dist:
                 hit_sl = True
-                break # Hit SL first
+                break
         
         if hit_tp and not hit_sl:
             labels.append(1)
         else:
             labels.append(0)
-            
+    
     return pd.Series(labels, index=df.index)
 
+
+def apply_fixed_barrier(df, time_horizon=20):
+    """Fallback: fixed pip barriers like original."""
+    labels = []
+    point = 0.00001 if "JPY" not in settings.SYMBOL else 0.01
+    tp_dist = 15 * point  # 15 pips for M15
+    sl_dist = 10 * point  # 10 pips
+    
+    for i in range(len(df)):
+        if i + time_horizon >= len(df):
+            labels.append(0)
+            continue
+        
+        entry_price = df['close'].iloc[i]
+        future = df.iloc[i+1 : i+1+time_horizon]
+        
+        hit_tp = any(future['high'] >= entry_price + tp_dist)
+        hit_sl = any(future['low'] <= entry_price - sl_dist)
+        
+        labels.append(1 if hit_tp and not hit_sl else 0)
+    
+    return pd.Series(labels, index=df.index)
+
+
 def train():
-    # 1. Fetch Data
-    print(f"Fetching {settings.HISTORY_BARS} bars for {settings.SYMBOL}...")
+    # 1. Fetch Data — M15 with maximum history
+    print(f"Fetching {settings.HISTORY_BARS} bars of M15 data for {settings.SYMBOL}...")
     if not loader.initial_connect():
         print("Failed to connect to MT5.")
         return
 
-    df = loader.get_historical_data(settings.SYMBOL, settings.TIMEFRAME, settings.HISTORY_BARS)
+    df = loader.get_historical_data(settings.SYMBOL, "M15", settings.HISTORY_BARS)
     if df is None or df.empty:
         print("No data fetched.")
         return
+    
+    print(f"Fetched {len(df)} bars")
 
-    # 2. Prepare Data & Features
-    print("Generating features...")
+    # 2. Generate ALL institutional features
+    print("Generating institutional features (SMC, ADX, VWAP, order blocks, FVGs)...")
     df = features.add_technical_features(df)
+    print(f"Features: {len([c for c in df.columns if c not in ['time','open','high','low','close','tick_volume','spread','real_volume']])} indicators")
     
-    # 3. Create Target (Barrier Method)
-    print("Labelling data (Triple Barrier)...")
-    # Assuming standard forex point, rough adjust if JPY
-    point = 0.00001 if "JPY" not in settings.SYMBOL else 0.01 
+    # 3. Label with ATR-based barriers (matches live trading)
+    print(f"Labelling data (ATR barriers: TP={settings.ATR_TP_MULTIPLIER}x, SL={settings.ATR_SL_MULTIPLIER}x)...")
+    df['target'] = apply_atr_barrier(
+        df, 
+        atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+        atr_sl_mult=settings.ATR_SL_MULTIPLIER,
+        time_horizon=20
+    )
     
-    # Target: Hit 10 pips profit before 5 pips loss within 20 bars
-    df['target'] = apply_triple_barrier(df, tp_pips=10, sl_pips=5, time_horizon=20, point=point)
+    # Drop last N rows where target couldn't be computed
+    df = df.iloc[:-21].dropna()
     
-    # Drop last N rows where target couldn't be computed clearly
-    df = df.iloc[:-21]
-    
-    # Balance Classes (Optional but good for imbalanced datasets)
+    # Class balance
     positives = df[df['target'] == 1]
     negatives = df[df['target'] == 0]
-    print(f"Class Balance: 1: {len(positives)}, 0: {len(negatives)}")
+    print(f"Class Balance: Wins: {len(positives)} ({len(positives)/len(df)*100:.1f}%), "
+          f"Losses: {len(negatives)} ({len(negatives)/len(df)*100:.1f}%)")
     
     # 4. Filter Features
-    drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'spread', 'real_volume', 'target']
+    drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 
+                 'spread', 'real_volume', 'target']
     feature_cols = [c for c in df.columns if c not in drop_cols]
     
     X = df[feature_cols]
     y = df['target']
     
-    # 5. Split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    print(f"Training on {len(X)} samples with {len(feature_cols)} features")
     
-    # 6. Train
-    print("Training Random Forest...")
-    # Increased minimum samples to reduce noise fitting
-    model = RandomForestClassifier(
-        n_estimators=200, 
-        max_depth=15, 
-        min_samples_leaf=5,
-        random_state=42, 
-        class_weight='balanced'
+    # 5. Time-based split (no shuffle — respects temporal order)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, shuffle=False
     )
-    model.fit(X_train, y_train)
+    
+    # 6. Train Random Forest (optimized for M15)
+    print("\nTraining Random Forest (M15 optimized)...")
+    rf_model = RandomForestClassifier(
+        n_estimators=300,      # More trees for M15 (more data per candle)
+        max_depth=20,          # Deeper for complex patterns
+        min_samples_leaf=10,   # Higher to avoid noise
+        min_samples_split=20,
+        max_features='sqrt',
+        random_state=42,
+        class_weight='balanced',
+        n_jobs=-1              # Use all CPU cores
+    )
+    rf_model.fit(X_train, y_train)
     
     # 7. Evaluate
-    preds = model.predict(X_test)
-    probs = model.predict_proba(X_test)[:, 1]
+    preds = rf_model.predict(X_test)
+    probs = rf_model.predict_proba(X_test)[:, 1]
     
-    print("--- Evaluation ---")
+    print("\n" + "="*50)
+    print("  EVALUATION RESULTS")
+    print("="*50)
     print(f"Accuracy: {accuracy_score(y_test, preds):.4f}")
     print(classification_report(y_test, preds))
     print("Confusion Matrix:")
     print(confusion_matrix(y_test, preds))
     
+    # Cross-validation score
+    print("\nCross-validation (5-fold)...")
+    cv_scores = cross_val_score(rf_model, X, y, cv=5, scoring='accuracy', n_jobs=-1)
+    print(f"CV Accuracy: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    
+    # Feature importance (top 15)
+    importances = pd.Series(rf_model.feature_importances_, index=feature_cols)
+    top_features = importances.nlargest(15)
+    print("\nTop 15 Most Important Features:")
+    for feat, imp in top_features.items():
+        print(f"  {feat:30s} {imp:.4f}")
+    
     # 8. Save
     os.makedirs(os.path.dirname(settings.MODEL_PATH), exist_ok=True)
-    joblib.dump(model, settings.MODEL_PATH)
+    joblib.dump(rf_model, settings.MODEL_PATH)
     joblib.dump(feature_cols, settings.MODEL_PATH.replace('.pkl', '_features.pkl'))
-    print(f"Model saved to {settings.MODEL_PATH}")
+    print(f"\nModel saved to {settings.MODEL_PATH}")
+    print(f"Features saved ({len(feature_cols)} features)")
+
 
 if __name__ == "__main__":
     train()

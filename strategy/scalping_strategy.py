@@ -35,12 +35,24 @@ except Exception as e:
     LAG_LLAMA_AVAILABLE = False
     print(f"Error loading LagLlamaPredictor: {e}")
 
+try:
+    from strategy.lstm_predictor import LSTMPredictor
+    LSTM_AVAILABLE = True
+    print("LSTMPredictor module found.")
+except ImportError:
+    LSTM_AVAILABLE = False
+    print("LSTMPredictor module not found.")
+except Exception as e:
+    LSTM_AVAILABLE = False
+    print(f"Error loading LSTMPredictor: {e}")
+
 class ScalpingStrategy:
     def __init__(self, mt5_client):
         self.client = mt5_client
         self.model = None
         self.feature_cols = None
         self.hf_predictor = None
+        self.lstm_predictor = None
         
         # Cooldown State
         self.last_trade_time = {} # Symbol -> timestamp
@@ -63,6 +75,22 @@ class ScalpingStrategy:
             except Exception as e:
                 print(f"Failed to init Chronos: {e}")
                 self.hf_predictor = None
+                
+        if settings.USE_LSTM:
+            if LSTM_AVAILABLE:
+                try:
+                    print("Initializing LSTM...")
+                    self.lstm_predictor = LSTMPredictor(
+                        model_path=settings.LSTM_MODEL_PATH,
+                        scaler_path=settings.LSTM_SCALER_PATH,
+                        device='cuda' if torch.cuda.is_available() else 'cpu'
+                    )
+                    print("LSTM initialized.")
+                except Exception as e:
+                    print(f"Failed to init LSTM: {e}")
+                    self.lstm_predictor = None
+            else:
+                 print("LSTM enabled in settings but module not available.")
         
     def load_model(self):
         try:
@@ -168,14 +196,39 @@ class ScalpingStrategy:
                     hf_signal = -1
             except Exception as e:
                 pass
+                
+        # 7. LSTM Prediction
+        lstm_signal = 0
+        lstm_pred_price = 0
+        if self.lstm_predictor:
+            try:
+                # LSTM needs df with features
+                lstm_pred_price = self.lstm_predictor.predict(df_features)
+                if lstm_pred_price:
+                     current_price = df['close'].iloc[-1]
+                     if lstm_pred_price > current_price:
+                         lstm_signal = 1
+                     else:
+                         lstm_signal = -1
+            except Exception as e:
+                print(f"LSTM Prediction Error: {e}")
         
-        # 7. Combined Logic with Filters
-        print(f"[{symbol}] RF: {rf_prob:.2f} | HF: {hf_signal} | Trend: {h1_trend}")
+        # 8. Combined Logic with Filters
+        print(f"[{symbol}] RF: {rf_prob:.2f} | HF: {hf_signal} | LSTM: {lstm_signal} ({lstm_pred_price:.5f}) | Trend: {h1_trend}")
         
         # FILTER: Only Buy if H1 Trend is UP or Neutral
         trend_ok = (h1_trend >= 0)
         
-        if rf_prediction == 1 and rf_prob > 0.55 and (hf_signal == 1 or not self.hf_predictor) and trend_ok:
+        # Combined Signal: RF + (HF or LSTM)
+        # We can implement a voting mechanism or priority
+        # Let's say: RF must be > 0.55 AND (HF==1 OR LSTM==1)
+        
+        ai_confirmation = (hf_signal == 1) or (lstm_signal == 1)
+        # If both are missing, we rely on RF? Or fail safe?
+        if not self.hf_predictor and not self.lstm_predictor:
+            ai_confirmation = True # Fallback to just RF if no AI available
+            
+        if rf_prediction == 1 and rf_prob > 0.55 and ai_confirmation and trend_ok:
             positions = self.client.get_positions(symbol=symbol)
             if not positions:
                 print(f"[{symbol}] >>> STRONG BUY SIGNAL <<<")
@@ -195,7 +248,43 @@ class ScalpingStrategy:
                      result = self.client.place_order(mt5.ORDER_TYPE_BUY, settings.SL_PIPS, settings.TP_PIPS, symbol=symbol, volume=lot)
                 
                 if result:
-                    print(f"[{symbol}] Order Executed.")
+                    print(f"[{symbol}] Buy Order Placed: {result}")
                     self.last_trade_time[symbol] = time.time()
+                    return
+
+        # --- SHORT ENTRY LOGIC ---
+        # RF Prob < 0.45 means high probability of Class 0 (Down)
+        # AI Confirmation: HF or LSTM predicts Drop (-1)
+        # Trend: Down or Neutral (<= 0)
+        
+        ai_sell_confirmation = (hf_signal == -1) or (lstm_signal == -1)
+        if not self.hf_predictor and not self.lstm_predictor:
+             ai_sell_confirmation = True # Fallback
+
+        if rf_prob < 0.50 and ai_sell_confirmation and h1_trend <= 0:
+            positions = self.client.get_positions(symbol=symbol)
+            if not positions:
+                print(f"[{symbol}] >>> STRONG SELL SIGNAL <<<")
+                
+                # Dynamic Sizing
+                lot = settings.LOT_SIZE
+                if rf_prob < 0.3: # Very strong Down signal
+                    lot = lot * settings.RISK_FACTOR_MAX
+                
+                # Execution
+                result = None
+                tick = mt5.symbol_info_tick(symbol)
+                if settings.USE_LIMIT_ORDERS:
+                     # Place Sell Limit at Ask (or slightly better? Standard is Sell Limit above market, 
+                     # but for immediate entry strategy we might want to just hit Bid or sit on Ask)
+                     # For symmetry with Buy (which used Bid), let's use Ask.
+                     result = self.client.place_order(mt5.ORDER_TYPE_SELL, settings.SL_PIPS, settings.TP_PIPS, symbol=symbol, volume=lot, limit_price=tick.ask)
+                else:
+                     result = self.client.place_order(mt5.ORDER_TYPE_SELL, settings.SL_PIPS, settings.TP_PIPS, symbol=symbol, volume=lot)
+                
+                if result:
+                     print(f"[{symbol}] Sell Order Placed: {result}")
+                     self.last_trade_time[symbol] = time.time()
+                     return
             else:
                 print(f"[{symbol}] Position already open.")
