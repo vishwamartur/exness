@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(__file__))
 from config import settings
 from execution.mt5_client import MT5Client
 from strategy.institutional_strategy import InstitutionalStrategy
+from api.stream_server import start_server, push_update
 
 async def main():
     print(f"=== INSTITUTIONAL STRATEGY v2.2 (Async) ===")
@@ -27,9 +28,15 @@ async def main():
         print("Failed to detect symbols. Exiting.")
         return
 
+    # 1.8 Start Stream Server
+    try:
+        start_server()
+    except Exception as e:
+        print(f"Failed to start stream server: {e}")
+
     # 2. Initialize Strategy
     try:
-        strategy = InstitutionalStrategy(client)
+        strategy = InstitutionalStrategy(client, on_event=push_update)
         print("Agents Initialized.")
     except Exception as e:
         print(f"Failed to init strategy: {e}")

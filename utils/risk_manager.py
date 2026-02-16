@@ -53,7 +53,7 @@ class RiskManager:
         Checks: Correlation.
         """
         # 5. Correlation Filter
-        conflict, reason = check_correlation_conflict(symbol, active_positions)
+        conflict, reason = check_correlation_conflict(symbol, direction, active_positions)
         if conflict:
             return False, f"Correlation Conflict: {reason}"
 

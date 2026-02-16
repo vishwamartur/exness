@@ -56,7 +56,10 @@ class TradeJournal:
                 notes TEXT,
                 researcher_action TEXT,
                 researcher_confidence INTEGER,
-                researcher_reason TEXT
+                researcher_reason TEXT,
+                post_mortem_analysis TEXT,
+                lesson_learned TEXT,
+                grading_score INTEGER
             )
         """)
 
@@ -66,6 +69,13 @@ class TradeJournal:
             cursor.execute("ALTER TABLE trades ADD COLUMN researcher_confidence INTEGER")
             cursor.execute("ALTER TABLE trades ADD COLUMN researcher_reason TEXT")
         except: pass # Columns likely exist
+        
+        # Phase 4.2: Critic Columns
+        try:
+            cursor.execute("ALTER TABLE trades ADD COLUMN post_mortem_analysis TEXT")
+            cursor.execute("ALTER TABLE trades ADD COLUMN lesson_learned TEXT")
+            cursor.execute("ALTER TABLE trades ADD COLUMN grading_score INTEGER")
+        except: pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_summary (

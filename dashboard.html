@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingAgents | Neural Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/umd/lucide.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="h-screen flex flex-col overflow-hidden">
+    <!-- Header -->
+    <header class="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/80">
+        <div class="flex items-center gap-3">
+            <i data-lucide="cpu" class="text-indigo-400"></i>
+            <h1 class="font-bold text-lg tracking-tight">Trading<span class="text-indigo-400">Agents</span> v2.2</h1>
+        </div>
+        <div class="flex items-center gap-4">
+            <div id="status" class="flex items-center gap-2 text-sm text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-red-500" id="status-dot"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex gap-6 p-6 overflow-hidden">
+
+        <!-- Left: Live Feed -->
+        <div class="w-1/3 flex flex-col gap-4">
+            <div class="card p-4 rounded-xl flex-1 flex flex-col h-full overflow-hidden">
+                <h2 class="text-sm font-semibold text-slate-400 mb-4 flex items-center gap-2">
+                    <i data-lucide="activity" class="w-4 h-4"></i> Live Event Stream
+                </h2>
+                <div id="log-container" class="flex-1 overflow-y-auto space-y-3 pr-2 mono text-xs">
+                    <!-- Logs will appear here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Active Thinking -->
+        <div class="w-2/3 flex flex-col gap-6">
+
+            <!-- Scanner Status -->
+            <div class="card p-6 rounded-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-sm font-semibold text-slate-400 flex items-center gap-2">
+                        <i data-lucide="radar" class="w-4 h-4"></i> Scanner Status
+                    </h2>
+                    <span id="scan-time" class="text-xs text-slate-500">Waiting...</span>
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="bg-slate-800/50 p-3 rounded-lg text-center">
+                        <div class="text-xs text-slate-500 mb-1">Total Symbols</div>
+                        <div id="scan-total" class="text-xl font-bold text-white">-</div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg text-center">
+                        <div class="text-xs text-slate-500 mb-1">Candidates</div>
+                        <div id="scan-candidates" class="text-xl font-bold text-indigo-400">-</div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg text-center">
+                        <div class="text-xs text-slate-500 mb-1">Filtered</div>
+                        <div id="scan-filtered" class="text-xl font-bold text-slate-400">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Researcher Debate -->
+            <div class="card p-6 rounded-xl flex-1 flex flex-col">
+                <h2 class="text-sm font-semibold text-slate-400 mb-4 flex items-center gap-2">
+                    <i data-lucide="brain-circuit" class="w-4 h-4"></i> Researcher Debate
+                </h2>
+                <div id="research-panel" class="flex-1 flex flex-col justify-center items-center text-slate-500">
+                    <p>No active debate.</p>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        const logContainer = document.getElementById('log-container');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const scanTotal = document.getElementById('scan-total');
+        const researchPanel = document.getElementById('research-panel');
+
+        function connect() {
+            const ws = new WebSocket('ws://localhost:8000/ws');
+
+            ws.onopen = () => {
+                statusDot.className = 'w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]';
+                statusText.innerText = 'Connected';
+                addLog('SYSTEM', 'Connected to Agent Swarm');
+            };
+
+            ws.onclose = () => {
+                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                statusText.innerText = 'Disconnected';
+                addLog('SYSTEM', 'Connection lost. Reconnecting in 3s...');
+                setTimeout(connect, 3000);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleMessage(msg);
+                } catch (e) {
+                    console.error('Parse error', e);
+                }
+            };
+        }
+
+        function handleMessage(msg) {
+            // Timestamp
+            const time = new Date(msg.timestamp || Date.now()).toLocaleTimeString();
+
+            if (msg.type === 'SCAN_START') {
+                scanTotal.innerText = msg.count;
+                document.getElementById('scan-time').innerText = 'Last Scan: ' + time;
+                addLog('SCANNER', `Scanning ${msg.count} instruments...`);
+            }
+
+            else if (msg.type === 'RESEARCH_START') {
+                addLog('RESEARCHER', `Analyzing ${msg.symbol}...`, 'text-indigo-400');
+                renderResearchPending(msg.symbol, msg.data);
+            }
+
+            else if (msg.type === 'RESEARCH_RESULT') {
+                const color = msg.action === 'BUY' ? 'text-emerald-400' : (msg.action === 'SELL' ? 'text-rose-400' : 'text-slate-400');
+                addLog('DEBATE', `Result: ${msg.action} (${msg.confidence}%)`, color);
+                renderResearchResult(msg);
+            }
+
+            else if (msg.type === 'TRADE_EXECUTION') {
+                addLog('EXECUTOR', `EXECUTE ${msg.direction} ${msg.symbol}`, 'text-emerald-500 font-bold');
+            }
+
+            else if (msg.type === 'CRITIC_REVIEW') {
+                const color = msg.score >= 7 ? 'text-emerald-400' : (msg.score <= 3 ? 'text-rose-400' : 'text-amber-400');
+                addLog('CRITIC', `Score ${msg.score}/10: ${msg.lesson}`, color);
+            }
+        }
+
+        function addLog(source, text, colorClass = 'text-slate-300') {
+            const div = document.createElement('div');
+            div.className = 'flex gap-2 fade-in';
+            div.innerHTML = `
+                <span class="text-slate-500 shrink-0">[${new Date().toLocaleTimeString().split(' ')[0]}]</span>
+                <span class="font-bold text-xs w-20 shrink-0 text-slate-400">${source}</span>
+                <span class="${colorClass}">${text}</span>
+            `;
+            logContainer.prepend(div);
+            // Limit logs
+            if (logContainer.children.length > 50) logContainer.lastChild.remove();
+        }
+
+        function renderResearchPending(symbol, data) {
+            researchPanel.innerHTML = `
+                <div class="w-full h-full flex flex-col gap-4 fade-in">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-2xl font-bold text-white">${symbol}</h3>
+                        <span class="px-2 py-1 bg-slate-800 rounded text-xs">Analyzing...</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div class="bg-slate-800/30 p-3 rounded">Regime: <span class="text-indigo-400">${data.regime || 'Unknown'}</span></div>
+                        <div class="bg-slate-800/30 p-3 rounded">Tech Score: <span class="text-white">${data.score || 0}</span></div>
+                    </div>
+                    <div class="flex-1 flex items-center justify-center">
+                        <i data-lucide="loader-2" class="w-8 h-8 text-indigo-500 animate-spin"></i>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderResearchResult(msg) {
+            const isBuy = msg.action === 'BUY';
+            const isSell = msg.action === 'SELL';
+            const color = isBuy ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' :
+                (isSell ? 'bg-rose-500/10 border-rose-500/50 text-rose-400' :
+                    'bg-slate-500/10 border-slate-500/50 text-slate-400');
+
+            researchPanel.innerHTML = `
+                <div class="w-full h-full flex flex-col gap-4 fade-in">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-2xl font-bold text-white">${msg.symbol}</h3>
+                        <div class="px-3 py-1 rounded border ${color} font-bold">${msg.action}</div>
+                    </div>
+                    <div class="flex-1 bg-slate-900/50 p-4 rounded-lg border border-slate-800 overflow-y-auto">
+                        <h4 class="text-xs uppercase tracking-wider text-slate-500 mb-2">Researcher Verdict</h4>
+                        <p class="text-lg leading-relaxed text-slate-200">"${msg.reason}"</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div class="h-full ${isBuy ? 'bg-emerald-500' : (isSell ? 'bg-rose-500' : 'bg-slate-500')}" style="width: ${msg.confidence}%"></div>
+                        </div>
+                        <span class="text-sm font-bold text-slate-400">${msg.confidence}% Confidence</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        connect();
+    </script>
+</body>
+
+</html>

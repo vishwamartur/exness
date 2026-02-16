@@ -30,6 +30,7 @@ from utils.news_filter import is_news_blackout, get_active_events
 from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
 from analysis.researcher_agent import ResearcherAgent
+from analysis.critic_agent import CriticAgent
 
 def _get_asset_class(symbol):
     if symbol in getattr(settings, 'SYMBOLS_CRYPTO', []): return 'crypto'
@@ -48,20 +49,23 @@ class InstitutionalStrategy:
     v2.1 Agentic Coordinator.
     Orchestrates specialized agents to Execute Trades.
     """
-    def __init__(self, mt5_client):
+    def __init__(self, mt5_client, on_event=None):
         self.client = mt5_client
+        self.on_event = on_event
         
         # ─── AGENTS ──────────────────────────────────────────────────────
         self.risk_manager = RiskManager(mt5_client)
         self.analyst = MarketAnalyst()
         self.quant = QuantAgent()
         self.researcher = ResearcherAgent()
+        self.critic = CriticAgent(on_event=on_event)
         
         # ─── STATE ───────────────────────────────────────────────────────
         self.last_trade_time = {}
         self.daily_trade_count = 0
         self.last_reset_date = datetime.now(timezone.utc).date()
         self.last_candle_time = {} 
+        self.last_critic_run = 0 
 
         # ─── INFRASTRUCTURE ──────────────────────────────────────────────
         self.cache = DataCache()
@@ -94,6 +98,12 @@ class InstitutionalStrategy:
         if active_news: print(f"[NEWS] {', '.join(active_news)}")
 
         print(f"\n{'='*60}\n  SCANNING {len(settings.SYMBOLS)} INSTRUMENTS (ASYNC)\n{'='*60}")
+        if self.on_event:
+            self.on_event({
+                "type": "SCAN_START",
+                "count": len(settings.SYMBOLS),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
 
         # ── Phase 1: Parallel Fetch ──
         # Filter symbols first
@@ -154,6 +164,13 @@ class InstitutionalStrategy:
             
             # ─── AGENT DEBATE (Researcher) ───────────────────────────────
             print(f"\n[RESEARCHER] Reviewing best candidate: {best['symbol']}...")
+            if self.on_event:
+                self.on_event({
+                    "type": "RESEARCH_START",
+                    "symbol": best['symbol'],
+                    "data": best,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
             
             attributes = best.pop('attributes') # Detach raw data for context
             analyst_mock = {'regime': best['regime']}
@@ -164,6 +181,16 @@ class InstitutionalStrategy:
                 
                 print(f"--> Debate Result: {research['action']} (Conf: {research['confidence']}%)")
                 print(f"--> Reason: {research['reason']}")
+
+                if self.on_event:
+                    self.on_event({
+                        "type": "RESEARCH_RESULT",
+                        "symbol": best['symbol'],
+                        "action": research['action'],
+                        "confidence": research['confidence'],
+                        "reason": research['reason'],
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
                 
                 # Decision Logic
                 # 1. Strong Researcher Agreement
@@ -189,6 +216,11 @@ class InstitutionalStrategy:
                 
         else:
             print("[SCANNER] No valid setups.")
+
+        # ── Phase 3: Self-Reflection (Critic) ──
+        if time.time() - self.last_critic_run > 300: # Run every 5 mins
+            asyncio.create_task(self.critic.analyze_closed_trades())
+            self.last_critic_run = time.time()
 
     async def _fetch_symbol_data(self, symbol):
         # Cooldown
@@ -282,6 +314,15 @@ class InstitutionalStrategy:
         res = self.client.place_order(cmd, symbol, lot, sl, tp)
         if res:
             print(f"✅ ORDER FILLED: {symbol}")
+            if self.on_event:
+                self.on_event({
+                    "type": "TRADE_EXECUTION",
+                    "symbol": symbol,
+                    "direction": direction,
+                    "price": price,
+                    "lot": lot,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
             self.risk_manager.record_trade(symbol)
             self.last_trade_time[symbol] = time.time()
             
