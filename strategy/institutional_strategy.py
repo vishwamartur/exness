@@ -29,6 +29,7 @@ import torch
 import time
 import xgboost as xgb
 from api import stream_server as stream
+from utils.risk_manager import RiskManager
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -102,6 +103,7 @@ class InstitutionalStrategy:
 
     def __init__(self, mt5_client):
         self.client = mt5_client
+        self.risk_manager = RiskManager(mt5_client)
         self.model = None       # Random Forest
         self.xgb_model = None   # XGBoost
         self.feature_cols = None
@@ -245,6 +247,12 @@ class InstitutionalStrategy:
         # ── Phase 1: Sequential data fetch (MT5 API is NOT thread-safe) ──
         symbol_data = {}
         for symbol in settings.SYMBOLS:
+            # Risk Check 1: Pre-scan (Spread, News, Cooldown)
+            allowed, reason = self.risk_manager.check_pre_scan(symbol)
+            if not allowed:
+                # print(f"[SKIP] {symbol}: {reason}")
+                continue
+
             data = self._fetch_symbol_data(symbol)
             if data is not None:
                 symbol_data[symbol] = data
@@ -269,11 +277,11 @@ class InstitutionalStrategy:
                 try:
                     result = future.result()
                     if result:
-                        # Correlation filter
-                        has_conflict, reason = check_correlation_conflict(
+                        # Correlation filter via RiskManager (Pre-execution check)
+                        allowed, reason = self.risk_manager.check_execution(
                             result['symbol'], result['direction'], all_positions
                         )
-                        if has_conflict:
+                        if not allowed:
                             skipped += 1
                         else:
                             candidates.append(result)
@@ -449,14 +457,15 @@ class InstitutionalStrategy:
         sl_distance = setup['sl_distance']
         tp_distance = setup['tp_distance']
 
-        # Dynamic position sizing scaled by confluence
-        risk_pct = settings.RISK_PERCENT
-        if score >= 6:
-            risk_pct = settings.MAX_RISK_PERCENT
-        elif score >= 5:
-            risk_pct = (settings.RISK_PERCENT + settings.MAX_RISK_PERCENT) / 2
+        # 1. Pre-execution Risk Check (Correlation, etc.)
+        positions = self.client.get_open_positions()
+        allowed, reason = self.risk_manager.check_execution(symbol, direction, positions)
+        if not allowed:
+            print(f"[RISK] Trade blocked for {symbol}: {reason}")
+            return
 
-        lot = self.client.calculate_lot_size(symbol, sl_distance, risk_pct)
+        # 2. Dynamic Position Sizing
+        lot = self.risk_manager.calculate_position_size(symbol, sl_distance, score)
 
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
@@ -490,16 +499,11 @@ class InstitutionalStrategy:
         )
 
         if result:
-            self.last_trade_time[symbol] = time.time()
-            self.daily_trade_count += 1
-            balance = self.client.get_account_balance()
-
-            # Get ticket from result for journal
-            ticket = result.order if hasattr(result, 'order') else 0
-
-            # Log to trade journal
-            self.journal.log_entry(
-                ticket=ticket,
+            print(f"✅ TRADE EXECUTED: {symbol} {direction} | Lot: {lot} | Score: {score}")
+            self.risk_manager.record_trade(symbol)
+            
+            # Log to Journal
+            self.journal.log_trade(
                 symbol=symbol,
                 direction=direction,
                 lot_size=lot,
