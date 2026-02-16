@@ -31,7 +31,7 @@ import xgboost as xgb
 from api import stream_server as stream
 from utils.risk_manager import RiskManager
 from analysis.regime import RegimeDetector
-from analysis.gemini_advisor import GeminiAdvisor
+from analysis.mistral_advisor import MistralAdvisor
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -107,7 +107,7 @@ class InstitutionalStrategy:
         self.client = mt5_client
         self.risk_manager = RiskManager(mt5_client)
         self.regime_detector = RegimeDetector()
-        self.gemini = GeminiAdvisor()
+        self.mistral = MistralAdvisor()
         self.model = None       # Random Forest
         self.xgb_model = None   # XGBoost
         self.feature_cols = None
@@ -424,9 +424,21 @@ class InstitutionalStrategy:
         ensemble = self._ensemble_vote(ml_prob, ai_signal, best_score)
         direction = "BUY" if buy_score >= sell_score else "SELL"
 
-        # ─── Gemini AI Analysis (Second Opinion) ─────────────────────────────
-        gemini_reason = ""
-        if best_score >= settings.MIN_CONFLUENCE_SCORE:  # Only check viable setups
+        # ─── Mistral AI Analysis (Second Opinion) ────────────────────────────
+        mistral_reason = ""
+        
+        # Setup Condtions:
+        # 1. Score >= MIN_CONFLUENCE (Standard)
+        # 2. Score >= 2 AND ML is Super Strong (Override for ranging markets)
+        # Note: ML Boost makes Score 2 -> 3 already? No, if baseline was 0.
+        # But if ML Boost gave +2, then Score is likely >= 2.
+        # So we allow score >= 3 (implied) or Explicit override.
+        
+        # Let's say we trust ML > 0.85 implicitly.
+        is_valid_setup = (best_score >= settings.MIN_CONFLUENCE_SCORE) or \
+                         (best_score >= 2 and (ml_prob > 0.85 or ml_prob < 0.15))
+
+        if is_valid_setup:  # Only check viable setups
             # Prepare indicators for LLM
             indicators = {
                 'close': float(last['close']),
@@ -436,17 +448,20 @@ class InstitutionalStrategy:
                 'ml_prob': float(ml_prob),
                 'h4_trend': h4_trend
             }
-            sentiment, confidence, reason = self.gemini.analyze_market(symbol, "M15", indicators)
-            gemini_reason = f"{sentiment} ({confidence}%): {reason}"
-            print(f"[GEMINI] {symbol}: {gemini_reason}")
-            
-            # Veto Power: If Gemini is strongly against, block it
-            if direction == "BUY" and sentiment == "BEARISH" and confidence > 80:
-                print(f"[GEMINI] VETO -> Blocking BUY on {symbol}")
-                return None
-            if direction == "SELL" and sentiment == "BULLISH" and confidence > 80:
-                print(f"[GEMINI] VETO -> Blocking SELL on {symbol}")
-                return None
+            try:
+                sentiment, confidence, reason = self.mistral.analyze_market(symbol, "M15", indicators)
+                mistral_reason = f"{sentiment} ({confidence}%): {reason}"
+                print(f"[MISTRAL] {symbol}: {mistral_reason}")
+                
+                # Veto Power: If Mistral is strongly against, block it
+                if direction == "BUY" and sentiment == "BEARISH" and confidence > 80:
+                    print(f"[MISTRAL] VETO -> Blocking BUY on {symbol}")
+                    return None
+                if direction == "SELL" and sentiment == "BULLISH" and confidence > 80:
+                    print(f"[MISTRAL] VETO -> Blocking SELL on {symbol}")
+                    return None
+            except Exception as e:
+                print(f"[MISTRAL] Skipped due to error: {e}")
 
         # Prepare stream data
         stream_data = {
@@ -461,8 +476,8 @@ class InstitutionalStrategy:
             'adx': float(last.get('adx', 0)),
             'rsi': float(last.get('rsi', 0)),
             'regime': regime,
-            'gemini': gemini_reason,
-            'is_setup': best_score >= settings.MIN_CONFLUENCE_SCORE
+            'mistral': mistral_reason,
+            'is_setup': is_valid_setup
         }
         try:
             stream.push_update(stream_data)
@@ -792,14 +807,27 @@ class InstitutionalStrategy:
         ml_prob = (rf_prob + xgb_prob) / 2 if self.xgb_model else rf_prob
         
         threshold = settings.RF_PROB_THRESHOLD
-        if direction == "buy" and ml_prob > threshold:
-            score += 1
-            details['ML'] = f'✓{ml_prob:.2f}'
-        elif direction == "sell" and ml_prob < (1 - threshold):
-            score += 1
-            details['ML'] = f'✓{ml_prob:.2f}'
-        else:
-            details['ML'] = f'✗{ml_prob:.2f}'
+        strong_threshold = 0.85
+        
+        if direction == "buy":
+            if ml_prob > strong_threshold:
+                score += 2
+                details['ML'] = f'✓✓{ml_prob:.2f}'
+            elif ml_prob > threshold:
+                score += 1
+                details['ML'] = f'✓{ml_prob:.2f}'
+            else:
+                details['ML'] = f'✗{ml_prob:.2f}'
+                
+        elif direction == "sell":
+            if ml_prob < (1 - strong_threshold):
+                score += 2
+                details['ML'] = f'✓✓{ml_prob:.2f}'
+            elif ml_prob < (1 - threshold):
+                score += 1
+                details['ML'] = f'✓{ml_prob:.2f}'
+            else:
+                details['ML'] = f'✗{ml_prob:.2f}'
 
         # 4. AI Confirmation (multi-symbol LSTM)
         ai_signal = self._get_ai_signal(symbol, df_features)

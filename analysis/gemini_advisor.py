@@ -70,9 +70,9 @@ class GeminiAdvisor:
             
             # If failed (e.g. 429 Quota, 404 Not Found), try fallback
             if response.status_code != 200:
-                print(f"[GEMINI] Primary model failed ({response.status_code}). Switching to Fallback...")
-                # Fallback to gemini-1.5-pro (more stable availability)
-                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={self.api_key}"
+                print(f"[GEMINI] Primary model failed ({response.status_code}). Switching to Fallback (Gemini 2.5)...")
+                # Fallback to gemini-2.5-computer-use-preview-10-2025
+                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-computer-use-preview-10-2025:generateContent?key={self.api_key}"
                 response = requests.post(fallback_url, json=payload, timeout=10)
 
             if response.status_code != 200:
