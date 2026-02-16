@@ -1,118 +1,104 @@
-# Institutional Scalping Bot v2.8 (Exness)
+# Institutional Swarm v4.0 (Exness)
 
-A high-frequency algorithmic trading bot for MetaTrader 5 (MT5), engineered for institutional-grade execution on Exness. It leverages a **Tri-Level AI System** combining classical Machine Learning, Time-Series Foundation Models, and Large Language Models (LLM) for market analysis.
+A **Multi-Agent Asynchronous Trading System** for MetaTrader 5 (MT5). This system evolves beyond simple algos by using a swarm of specialized AI agents that debate, execute, and self-reflect on trades in real-time.
 
-## 🚀 Key Features (v2.8)
+## 🧠 The Swarm Architecture
 
-### 🧠 Tri-Level AI Intelligence
-1.  **Directional Classifier (Random Forest)**: 
-    - Trained on historical price action with Triple Barrier Method labelling.
-    - **ML Boost**: Signals with **>85% confidence** automatically override neutral trend filters.
-2.  **Zero-Shot Forecaster (Lag-Llama / Chronos)**: 
-    - A Time-Series Foundation Model that forecasts the next 12-minute trajectory.
-    - Acts as a confirmation layer for the RF model.
-3.  **LLM Validator (Mistral AI)**: 
-    - The "Second Opinion" layer.
-    - **Mistral-Small** analyzes technical indicators (RSI, ADX, Trend) and gives a qualitative Veto.
-    - If Mistral says **BEARISH** when the bot says **BUY**, the trade is blocked.
+The monolithic strategy has been decomposed into 5 specialized Agents running on an **Async Event Loop**:
 
-### 🛡️ Institutional Risk Management
-*   **H4 Trend Veto**: Strictly blocks trades against the 4-Hour trend structure ("The Trend is Your Friend").
-*   **Dynamic Position Sizing**: 
-    - Base Risk: 1% per trade.
-    - Scaled Risk: Up to 2% for high-probability setups (>70%).
-*   **Correlation Filter**: Prevents double exposure (e.g., won't buy `EURUSD` and `GBPUSD` simultaneously).
-*   **News Filter**: Automatically halts trading 30 mins before/after high-impact news (ForexFactory).
+1.  **Analyst Agent (The "Fundamentalist")** 🌍
+    -   *Role*: Scans macro news (ForexFactory) and Market Regime.
+    -   *Tech*: Mistral 7B / Google Gemini.
+    -   *Output*: "Risk-On", "Risk-Off", or "Range-Bound".
+    -   *Memory*: Persists regime capability in **Shared Memory (SQLite)**.
 
-### ⚡ Execution Engine
-*   **Multi-Pair Scanning**: Monitors 11 pairs in parallel (`EURUSD`, `GBPUSD`, `XAUUSD`, etc.).
-*   **Smart Entry**: Uses Limit Orders at Bid/Ask to minimize slippage.
-*   **Stream Server**: WebSocket server pushes real-time telemetry to a local dashboard (Port 8000).
+2.  **Quant Agent (The "Technician")** 📊
+    -   *Role*: Analyzes price action, indicators, and ML probabilities.
+    -   *Tech*: XGBoost, RandomForest, Lag-Llama (Time-Series Transformer).
+    -   *Output*: Signal Confidence (0-100%).
+
+3.  **Researcher Agent (The "Debater")** ⚖️
+    -   *Role*: Conducting a Bull vs. Bear debate before every trade.
+    -   *Process*: Synthesizes Analyst & Quant data to reach a `GO/NO-GO` verdict.
+    -   *Output*: Final Trade Decision & Reasoning.
+
+4.  **Risk Agent (The "Warden")** 🛡️
+    -   *Role*: Enforces capital preservation.
+    -   *Checks*: Daily Drawdown, Circuit Breakers (Shared State), Correlation Matrices.
+    -   *Power*: VETO capability over all other agents.
+
+5.  **Critic Agent (The "Teacher")** 🎓
+    -   *Role*: Post-mortem analysis of closed trades.
+    -   *Action*: Reviews every P&L event, assigns a **Score (0-10)**, and logs a "Lesson Learned".
+
+---
+
+## 🚀 Key Features (v4.0)
+
+### ⚡ Async Core
+-   **Non-Blocking**: Scans 40+ symbols in parallel using `asyncio` & `ThreadPoolExecutor`.
+-   **WebSocket Dashboard**: Streams live agent thoughts to a local UI (`dashboard.html` @ Port 8000).
+
+### 💾 Shared Memory
+-   **Persistence**: Uses `utils/shared_state.py` (SQLite) to remember state across restarts.
+-   **Resilience**: Intelligent recovery of Daily Bias and Risk Limits after crashes.
+
+### 📈 Tri-Level AI
+1.  **XGBoost/RF**: For pattern recognition.
+2.  **Lag-Llama**: For zero-shot time-series forecasting.
+3.  **LLM (Mistral/Gemini)**: For qualitative reasoning and self-reflection.
 
 ---
 
 ## 🛠️ Installation
 
 ### Prerequisites
-*   Windows OS (Required for MT5 Terminal)
+*   Windows OS (Required for Mt5)
 *   Python 3.10+
-*   MetaTrader 5 Terminal (Logged in to Exness)
+*   MetaTrader 5 Terminal (Logged in)
 
 ### Setup
-1.  **Clone the Repository**:
+1.  **Clone & Install**:
     ```bash
     git clone https://github.com/vishwamartur/exness.git
     cd exness
-    ```
-
-2.  **Install Dependencies**:
-    ```bash
     pip install -r requirements.txt
     ```
-    *Note: Installs `torch`, `gluonts`, `xgboost`, and `mistralai` compatible libraries.*
 
-3.  **Configuration**:
-    Create a `.env` file in the root directory:
+2.  **Configuration**:
+    Create `.env`:
     ```env
-    # MT5 Credentials
     MT5_LOGIN=12345678
     MT5_PASSWORD=your_password
     MT5_SERVER=Exness-Real
-    MT5_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
+    MISTRAL_API_KEY=your_key
+    ```
+    *See `config/settings.py` for advanced tuning.*
 
-    # AI Configuration
-    MISTRAL_API_KEY=your_mistral_key_here
-    
-    # Strategy Settings
-    MIN_CONFLUENCE_SCORE=3
-    RF_PROB_THRESHOLD=0.65
-    MAX_RISK_PER_TRADE=0.02
+3.  **Train Models**:
+    ```bash
+    python train_model.py
     ```
 
 ---
 
 ## 🖥️ Usage
 
-### 1. Train the Models
-Before first run, download data and train the classifier:
+### 🟢 Live Trading
+Launch the Async Swarm:
 ```bash
-python train_model.py
+python main_async.py
 ```
 
-### 2. Run the Bot
-Start the institutional scanner:
-```bash
-python main.py
-```
-*The bot will start the WebSocket server and begin scanning M15 candles.*
+### 📊 Dashboard
+Open `dashboard.html` in your browser to watch the agents think in real-time.
 
-### 3. Diagnostics
-If trades are not executing, run the debug tools:
-*   **`python debug_scan.py`**: Analyzes connection, logic, and why trades are rejected.
-*   **`python debug_ml.py`**: checks ML model probability outputs and H4 trend alignment.
-
----
-
-## 📊 Strategy Logic (Sureshot)
-
-The bot scores every setup on a scale of **0 to 6** (Confluence Score):
-
-| Factor | Points | Condition |
-| :--- | :--- | :--- |
-| **H4 Trend** | +1 | Trend Aligned |
-| **H1 Trend** | +1 | Trend Aligned |
-| **ML Signal** | +1 | Prob > Threshold (0.65) |
-| **ML Boost** | **+2** | Prob > **0.85** (Confident) |
-| **AI (Mistral)** | +1 | Bullish/Bearish Confirmation |
-| **SMC** | +1 | Near Order Block / FVG |
-| **ADX** | +1 | Volatility Present (>25) |
-
-**Execution Rules:**
-1.  **Standard**: Score ≥ **3**.
-2.  **Override**: Score ≥ **2** IF ML Confidence > **85%**.
-3.  **Veto**: If Mistral Strongly Disagrees -> **BLOCK**.
+### 🛠️ Diagnostics
+-   **`debug_async.py`**: Test the full loop with mock data.
+-   **`debug_shared_memory.py`**: Verify database persistence.
+-   **`debug_critic.py`**: Force-run the Self-Reflection agent.
 
 ---
 
 ## ⚠️ Disclaimer
-Trading Forex/CFDs involves substantial risk of loss. This software is for **educational purposes only**. The authors are not responsible for financial losses. Always test on a Demo account first.
+**Institutional Swarm** is strictly for educational and research purposes. Financial trading involves significant risk. The authors are not responsible for losses.
