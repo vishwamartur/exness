@@ -10,7 +10,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import settings
-from data import loader
+from market_data import loader
 from strategy import features
 
 # Try importing HF Predictor and Lag-Llama

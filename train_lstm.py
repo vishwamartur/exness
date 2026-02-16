@@ -31,7 +31,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from strategy import features
 from strategy.lstm_model import BiLSTMWithAttention
-from data import loader
+from market_data import loader
 from config import settings
 
 # Key symbols to train models for

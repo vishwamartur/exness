@@ -19,7 +19,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from config import settings
-from data import loader
+from market_data import loader
 from strategy import features
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, cross_val_score

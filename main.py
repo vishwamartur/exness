@@ -11,6 +11,7 @@ from config import settings
 from execution.mt5_client import MT5Client
 from strategy.institutional_strategy import InstitutionalStrategy
 from utils.auto_trainer import AutoTrainer
+from api import stream_server as stream
 
 
 def main():
@@ -61,6 +62,9 @@ def main():
     # 4. Start Auto-Trainer (background self-learning)
     trainer = AutoTrainer(strategy, strategy.journal)
     trainer.start()
+    
+    # 5. Start WebSocket Stream Server
+    stream.start_server(port=8000)
         
     print(f"\nScanner ready. {len(settings.SYMBOLS)} instruments | "
           f"Self-learning active | Trade journal active\n")

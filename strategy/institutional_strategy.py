@@ -25,7 +25,10 @@ import os
 import sys
 import MetaTrader5 as mt5
 import torch
+import torch
 import time
+import xgboost as xgb
+from api import stream_server as stream
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,7 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import settings
-from data import loader
+from market_data import loader
 from strategy import features
 from utils.data_cache import DataCache
 from utils.trade_journal import TradeJournal
@@ -99,7 +102,8 @@ class InstitutionalStrategy:
 
     def __init__(self, mt5_client):
         self.client = mt5_client
-        self.model = None
+        self.model = None       # Random Forest
+        self.xgb_model = None   # XGBoost
         self.feature_cols = None
         self.hf_predictor = None
         self.lstm_predictors = {}  # Multi-symbol: {base_symbol: LSTMPredictor}
@@ -171,16 +175,30 @@ class InstitutionalStrategy:
                 print(f"  Default LSTM failed: {e}")
 
     def load_model(self):
-        """Load the Random Forest model."""
+        """Loads both Random Forest and XGBoost models."""
         try:
-            self.model = joblib.load(settings.MODEL_PATH)
-            feature_path = settings.MODEL_PATH.replace('.pkl', '_features.pkl')
-            if os.path.exists(feature_path):
-                self.feature_cols = joblib.load(feature_path)
-            print("RF Model loaded successfully.")
-            return True
+            # 1. Load RF Model
+            if os.path.exists(settings.MODEL_PATH):
+                self.model = joblib.load(settings.MODEL_PATH)
+                print(f"RF Model loaded successfully.")
+            else:
+                print(f"RF model not found at {settings.MODEL_PATH}")
+
+            # 2. Load XGBoost Model
+            if getattr(settings, 'USE_XGBOOST', False) and os.path.exists(settings.XGB_MODEL_PATH):
+                self.xgb_model = joblib.load(settings.XGB_MODEL_PATH)
+                print(f"XGBoost Model loaded successfully.")
+            else:
+                print(f"XGBoost model not found or disabled.")
+
+            # 3. Load Feature Columns (shared/common)
+            feat_path = settings.MODEL_PATH.replace('.pkl', '_features.pkl')
+            if os.path.exists(feat_path):
+                self.feature_cols = joblib.load(feat_path)
+            
+            return self.model is not None
         except Exception as e:
-            print(f"Error loading model: {e}")
+            print(f"Error loading models: {e}")
             return False
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -372,6 +390,25 @@ class InstitutionalStrategy:
         best_score = max(buy_score, sell_score)
         ensemble = self._ensemble_vote(rf_prob, ai_signal, best_score)
 
+        # Prepare stream data
+        stream_data = {
+            'symbol': symbol,
+            'time': str(last['time']),
+            'close': float(last['close']),
+            'score': best_score,
+            'direction': 'BUY' if buy_score >= sell_score else 'SELL',
+            'rf_prob': float(rf_prob),
+            'ai_signal': float(ai_signal),
+            'atr': float(atr),
+            'adx': float(last.get('adx', 0)),
+            'rsi': float(last.get('rsi', 0)),
+            'is_setup': best_score >= settings.MIN_CONFLUENCE_SCORE
+        }
+        try:
+            stream.push_update(stream_data)
+        except Exception:
+            pass
+
         # Pick the stronger direction — no minimum filter here, let scanner rank
         if buy_score >= sell_score and buy_score >= settings.MIN_CONFLUENCE_SCORE:
             return {
@@ -401,7 +438,7 @@ class InstitutionalStrategy:
                 'atr': atr,
                 'df_features': df_features,
             }
-
+        
         return None
 
     def _execute_trade(self, setup):
@@ -680,17 +717,23 @@ class InstitutionalStrategy:
             else:
                 details['H1'] = '✗'
 
-        # 3. RF Model
-        rf_prob, rf_pred = self._get_rf_prediction(df_features)
+        # 3. Tree Ensemble (RF + XGBoost)
+        rf_prob, _ = self._get_rf_prediction(df_features)
+        xgb_prob, _ = self._get_xgb_prediction(df_features)
+        
+        # Weighted average or separate votes? 
+        # Averaging is more robust against single-model noise.
+        ml_prob = (rf_prob + xgb_prob) / 2 if self.xgb_model else rf_prob
+        
         threshold = settings.RF_PROB_THRESHOLD
-        if direction == "buy" and rf_prob > threshold:
+        if direction == "buy" and ml_prob > threshold:
             score += 1
-            details['RF'] = f'✓{rf_prob:.2f}'
-        elif direction == "sell" and rf_prob < (1 - threshold):
+            details['ML'] = f'✓{ml_prob:.2f}'
+        elif direction == "sell" and ml_prob < (1 - threshold):
             score += 1
-            details['RF'] = f'✓{rf_prob:.2f}'
+            details['ML'] = f'✓{ml_prob:.2f}'
         else:
-            details['RF'] = f'✗{rf_prob:.2f}'
+            details['ML'] = f'✗{ml_prob:.2f}'
 
         # 4. AI Confirmation (multi-symbol LSTM)
         ai_signal = self._get_ai_signal(symbol, df_features)
@@ -749,15 +792,43 @@ class InstitutionalStrategy:
                 return 0.5, 0
             X = last_row[available_cols]
         else:
+            # Fallback if feature_cols not defined, drop common non-feature columns
             drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume',
                          'spread', 'real_volume', 'target']
-            X = last_row.drop(columns=[c for c in drop_cols if c in last_row.columns])
-
+            X = last_row.drop(columns=[c for c in drop_cols if c in last_row.columns], errors='ignore')
+        
         try:
-            prediction = self.model.predict(X)[0]
             prob = self.model.predict_proba(X)[0][1]
-            return prob, prediction
-        except Exception:
+            pred = self.model.predict(X)[0]
+            return prob, pred
+        except Exception as e:
+            # print(f"RF Prediction error: {e}") # Uncomment for debugging
+            return 0.5, 0
+
+    def _get_xgb_prediction(self, df_features):
+        """Returns (probability, prediction) from XGBoost model."""
+        if self.xgb_model is None:
+            return 0.5, 0
+
+        last_row = df_features.iloc[-1:]
+
+        if self.feature_cols:
+            available_cols = [c for c in self.feature_cols if c in last_row.columns]
+            if not available_cols:
+                return 0.5, 0
+            X = last_row[available_cols]
+        else:
+            # Fallback if feature_cols not defined, drop common non-feature columns
+            X = last_row.drop(columns=['time', 'open', 'high', 'low', 'close', 
+                                     'tick_volume', 'spread', 'real_volume', 'target'], 
+                            errors='ignore')
+            
+        try:
+            prob = self.xgb_model.predict_proba(X)[0][1]
+            pred = self.xgb_model.predict(X)[0]
+            return prob, pred
+        except Exception as e:
+            # print(f"XGBoost Prediction error: {e}") # Uncomment for debugging
             return 0.5, 0
 
     # ─── AI Signal (Multi-Symbol LSTM) ───────────────────────────────────

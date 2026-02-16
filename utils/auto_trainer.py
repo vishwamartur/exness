@@ -23,22 +23,16 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from datetime import datetime, timezone
+import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, TensorDataset
 
-# Add project root to path (highest priority) to avoid lag-llama namespace conflict
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+# Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import settings
-
-# Load data.loader from exact path to avoid lag-llama's 'data' namespace collision
-_loader_path = os.path.join(_PROJECT_ROOT, 'data', 'loader.py')
-_spec = importlib.util.spec_from_file_location('data.loader', _loader_path)
-loader = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(loader)
+from market_data import loader
 
 from strategy import features
 
@@ -98,15 +92,18 @@ class AutoTrainer:
 
     def __init__(self, strategy, journal,
                  rf_interval_hours=4,
+                 xgb_interval_hours=6,
                  lstm_interval_hours=8,
                  perf_check_minutes=30):
         self.strategy = strategy
         self.journal = journal
         self.rf_interval = rf_interval_hours * 3600
+        self.xgb_interval = xgb_interval_hours * 3600
         self.lstm_interval = lstm_interval_hours * 3600
         self.perf_check_interval = perf_check_minutes * 60
 
         self.last_rf_train = time.time()
+        self.last_xgb_train = time.time() - (xgb_interval_hours * 1800)  # Offset start
         self.last_lstm_train = time.time()
         self.last_perf_check = time.time()
         self._running = False
@@ -155,6 +152,11 @@ class AutoTrainer:
                 if now - self.last_rf_train >= self.rf_interval:
                     self._retrain_rf()
                     self.last_rf_train = now
+
+                # XGBoost retrain
+                if now - self.last_xgb_train >= self.xgb_interval:
+                    self._retrain_xgboost()
+                    self.last_xgb_train = now
 
                 # LSTM retrain
                 if now - self.last_lstm_train >= self.lstm_interval:
@@ -270,6 +272,79 @@ class AutoTrainer:
 
         except Exception as e:
             print(f"[AUTO-TRAIN] RF retrain failed: {e}")
+
+    # ─── XGBoost Retraining ──────────────────────────────────────────────
+
+    def _retrain_xgboost(self, emergency=False):
+        """Retrains XGBoost classifier."""
+        if not getattr(settings, 'USE_XGBOOST', False):
+            return
+
+        tag = "EMERGENCY" if emergency else "SCHEDULED"
+        print(f"\n[AUTO-TRAIN] XGBoost retrain ({tag})...")
+
+        try:
+            symbol = settings.SYMBOLS[0] if settings.SYMBOLS else "EURUSD"
+            df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
+            if df is None or len(df) < 500:
+                print("[AUTO-TRAIN] Not enough data for XGBoost")
+                return
+
+            df = features.add_technical_features(df)
+            df['target'] = _label_with_atr(
+                df,
+                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+                atr_sl_mult=settings.ATR_SL_MULTIPLIER
+            )
+            df = df.iloc[:-21].dropna()
+
+            drop_cols = ['time', 'open', 'high', 'low', 'close',
+                         'tick_volume', 'spread', 'real_volume', 'target']
+            feature_cols = [c for c in df.columns if c not in drop_cols]
+            X = df[feature_cols]
+            y = df['target']
+
+            # Balance
+            pos = (y == 1).sum()
+            neg = (y == 0).sum()
+            ratio = neg / pos if pos > 0 else 1.0
+
+            split_idx = int(len(X) * 0.8)
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+            y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+
+            new_model = xgb.XGBClassifier(
+                n_estimators=300,
+                max_depth=6,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                scale_pos_weight=ratio,
+                random_state=42,
+                n_jobs=-1,
+                eval_metric='logloss'
+            )
+            new_model.fit(X_train, y_train)
+
+            # Validate
+            from sklearn.metrics import accuracy_score
+            preds = new_model.predict(X_test)
+            accuracy = accuracy_score(y_test, preds)
+
+            if accuracy < 0.50:
+                print(f"[AUTO-TRAIN] XGB accuracy too low ({accuracy:.2f}). Keep old.")
+                return
+
+            # Hot-swap
+            with self._lock:
+                os.makedirs(MODELS_DIR, exist_ok=True)
+                joblib.dump(new_model, settings.XGB_MODEL_PATH)
+                self.strategy.xgb_model = new_model
+            
+            print(f"[AUTO-TRAIN] ✓ XGB retrained: accuracy={accuracy:.3f}")
+
+        except Exception as e:
+            print(f"[AUTO-TRAIN] XGB retrain failed: {e}")
 
     # ─── LSTM Retraining ─────────────────────────────────────────────────
 
@@ -429,6 +504,7 @@ class AutoTrainer:
             'lstm_retrains': self.lstm_retrain_count,
             'emergency_retrains': self.emergency_retrain_count,
             'next_rf_in': max(0, self.rf_interval - (now - self.last_rf_train)) / 60,
+            'next_xgb_in': max(0, self.xgb_interval - (now - self.last_xgb_train)) / 60,
             'next_lstm_in': max(0, self.lstm_interval - (now - self.last_lstm_train)) / 60,
         }
 
@@ -436,5 +512,6 @@ class AutoTrainer:
         """Prints compact status."""
         s = self.get_status()
         print(f"[AUTO-TRAIN] RF: {s['rf_retrains']} retrains (next in {s['next_rf_in']:.0f}min) | "
+              f"XGB: next in {s['next_xgb_in']:.0f}min | "
               f"LSTM: {s['lstm_retrains']} retrains | "
               f"Emergency: {s['emergency_retrains']}")

@@ -111,6 +111,8 @@ TRAIN_TEST_SPLIT = 0.8
 
 # ─── Model Settings ─────────────────────────────────────────────────────
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "scalper_v1.pkl")
+XGB_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "xgboost_v1.pkl")
+USE_XGBOOST = True
 
 # Lag-Llama Settings
 USE_LAG_LLAMA = os.getenv("USE_LAG_LLAMA", "True").lower() == "true"

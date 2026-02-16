@@ -10,7 +10,7 @@ Cuts hundreds of API calls per scan cycle.
 """
 
 import time
-from data import loader
+from market_data import loader
 
 
 class DataCache:
