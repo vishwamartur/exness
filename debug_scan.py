@@ -2,6 +2,7 @@
 import sys
 import os
 import pandas as pd
+import traceback
 from datetime import datetime
 from config import settings
 from execution.mt5_client import MT5Client
@@ -30,14 +31,16 @@ def debug_scan():
         print(f"--- ANALYZING {symbol} ---")
         
         # 1. Fetch Data
-        data = strategy._fetch_symbol_data(symbol)
-        if not data:
-            print("  No data fetched.")
+        try:
+            data = strategy._fetch_symbol_data(symbol)
+            if not data:
+                print("  No data fetched.")
+                continue
+        except Exception:
+            traceback.print_exc()
             continue
             
-        df = data['M15']
-        h1 = data['H1']
-        h4 = data['H4']
+        df = data[settings.TIMEFRAME] # Dynamic key match
         
         # 2. Features
         try:
@@ -47,47 +50,68 @@ def debug_scan():
             print(f"  Feature error: {e}")
             continue
 
-        # 3. ML Prob
-        ml_prob = 0.5
-        # features = strategy.prepare_features(df_features) # This method might not exist public
-        # We need to replicate how strategy gets prediction
+        # 3. Check ML Prob (Directly)
         try:
             rf_prob, _ = strategy._get_rf_prediction(df_features)
-            xgb_prob, _ = strategy._get_xgb_prediction(df_features)
-            ml_prob = (rf_prob + xgb_prob) / 2 if strategy.xgb_model else rf_prob
+            # xgb_prob, _ = strategy._get_xgb_prediction(df_features) # Skip XGB if causing issues
+            ml_prob = rf_prob 
+            if strategy.xgb_model:
+                try:
+                    xgb_prob, _ = strategy._get_xgb_prediction(df_features)
+                    ml_prob = (rf_prob + xgb_prob) / 2
+                except Exception as e:
+                    print(f"  XGB Error: {e}")
+            print(f"  ML Prob (Calculated): {ml_prob:.4f}")
         except Exception as e:
-            print(f"  ML Error: {e}")
+            print(f"  ML Calc Error: {e}")
+            ml_prob = 0.5
 
         # 4. H4 Trend
-        h4_trend = strategy.get_h4_trend(symbol)
+        h4_trend = 0
+        try:
+            h4_trend = strategy.get_h4_trend(symbol)
+        except Exception:
+            pass
         
         # 5. Score
-        buy_score, sell_score, details = strategy._calculate_confluence(
-            symbol, df_features, direction="buy", h4_trend=h4_trend
-        ) 
-        # Wait, _calculate_confluence takes direction arg? 
-        # signature: (self, symbol, df_features, direction="buy", h1_trend=None, h4_trend=None)
-        
-        # We need to call it twice
-        b_score, b_details = strategy._calculate_confluence(symbol, df_features, "buy", h4_trend=h4_trend)
-        s_score, s_details = strategy._calculate_confluence(symbol, df_features, "sell", h4_trend=h4_trend)
-        
-        print(f"  Close: {last['close']:.5f}")
-        print(f"  H4 Trend: {h4_trend}")
-        print(f"  ML Prob:  {ml_prob:.2f} (Threshold: {settings.RF_PROB_THRESHOLD})")
-        print(f"  Buy Score:  {b_score} {b_details}")
-        print(f"  Sell Score: {s_score} {s_details}")
-        
-        best_score = max(b_score, s_score)
-        
-        if best_score < settings.MIN_CONFLUENCE_SCORE:
-            print(f"  -> REJECTED: Score {best_score} < Min {settings.MIN_CONFLUENCE_SCORE}")
-        elif ml_prob < settings.RF_PROB_THRESHOLD:
-             # Check if ML was the reason for low score?
-             # Actually calculate_confluence adds point if ml_prob > threshold
-             pass
-        else:
-            print(f"  -> CANDIDATE! (Pending Mistral check)")
+        try:
+            # Explicit kwargs to avoid TypeError
+            b_score, b_details = strategy._calculate_confluence(
+                symbol=symbol, 
+                df_features=df_features, 
+                direction="buy", 
+                h4_trend=h4_trend
+            )
+            s_score, s_details = strategy._calculate_confluence(
+                symbol=symbol, 
+                df_features=df_features, 
+                direction="sell", 
+                h4_trend=h4_trend
+            )
+            
+            print(f"  Close: {last['close']:.5f}")
+            print(f"  H4 Trend: {h4_trend}")
+            print(f"  Buy Score:  {b_score} {b_details}")
+            print(f"  Sell Score: {s_score} {s_details}")
+            
+            best_score = max(b_score, s_score)
+            
+            # Replicate the Logic
+            is_valid = False
+            if best_score >= settings.MIN_CONFLUENCE_SCORE:
+                is_valid = True
+                print(f"  -> VALID (Standard Score >= {settings.MIN_CONFLUENCE_SCORE})")
+            elif best_score >= 2 and (ml_prob > 0.85 or ml_prob < 0.15):
+                is_valid = True
+                print(f"  -> VALID (ML Boost Override: Score {best_score} >= 2 & Strong ML)")
+            else:
+                print(f"  -> REJECTED. Score {best_score}. ML {ml_prob:.4f}")
+                if best_score >= 2:
+                    print(f"     (Failed ML Boost check: Need > 0.85 or < 0.15)")
+
+        except Exception:
+            print("  Score Calculation Crashed:")
+            traceback.print_exc()
 
     client.shutdown()
 

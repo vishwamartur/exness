@@ -5,7 +5,8 @@ from datetime import datetime
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*X has feature names.*") 
-warnings.filterwarnings("ignore", category=UserWarning, module="gluonts.torch.util")
+warnings.filterwarnings("ignore", category=UserWarning, module="gluonts")
+warnings.filterwarnings("ignore", message=".*Using a non-tuple sequence for multidimensional indexing.*")
 
 from config import settings
 from execution.mt5_client import MT5Client

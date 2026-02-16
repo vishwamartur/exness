@@ -357,7 +357,7 @@ class InstitutionalStrategy:
         h4_df = loader.get_historical_data(symbol, "H4", 60)
 
         return {
-            'M15': df,
+            settings.TIMEFRAME: df,
             'H1': h1_df,
             'H4': h4_df,
         }
@@ -368,7 +368,7 @@ class InstitutionalStrategy:
         data_dict = {'M15': df, 'H1': df, 'H4': df}
         Returns the best setup (buy or sell) or None.
         """
-        df = data_dict['M15']
+        df = data_dict[settings.TIMEFRAME]
 
         # Feature engineering
         try:
@@ -529,7 +529,7 @@ class InstitutionalStrategy:
         tp_distance = setup['tp_distance']
 
         # 1. Pre-execution Risk Check (Correlation, etc.)
-        positions = self.client.get_open_positions()
+        positions = self.client.get_all_positions()
         allowed, reason = self.risk_manager.check_execution(symbol, direction, positions)
         if not allowed:
             print(f"[RISK] Trade blocked for {symbol}: {reason}")

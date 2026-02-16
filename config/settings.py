@@ -72,7 +72,7 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))  # SL = 1.5x ATR
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))  # TP = 3.0x ATR (2:1 R:R)
 
 # Confluence Gating
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 4))  # Minimum 4 confluences to enter
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Sureshot mode: only 5+ score fires
 RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.70))   # Stricter RF threshold (was 0.65)
 
@@ -95,7 +95,7 @@ BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 1.0))  # Move SL to breakeven at 
 
 # ─── Multi-Timeframe Trend Filters ───────────────────────────────────────
 H1_TREND_FILTER = True
-H4_TREND_FILTER = True
+H4_TREND_FILTER = False  # Disabled to allow ML-based reversals (Scalping)
 
 # ─── Session Awareness (UTC hours) ──────────────────────────────────────
 TRADE_SESSIONS = {
