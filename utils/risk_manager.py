@@ -7,11 +7,17 @@ import MetaTrader5 as mt5
 from config import settings
 from utils.news_filter import is_news_blackout, get_active_events
 from utils.correlation_filter import check_correlation_conflict
+from utils.shared_state import SharedState
 
 class RiskManager:
     def __init__(self, mt5_client=None):
         self.client = mt5_client
-        self.daily_trades = 0
+        self.state = SharedState()
+        
+        # Restore Daily Trades from Shared State
+        cached_count = self.state.get("daily_trades", 0)
+        # Reset if new day (simple check, ideally check date)
+        self.daily_trades = cached_count
         self.last_trade_time = {}  # {symbol: timestamp}
 
     def check_pre_scan(self, symbol):
@@ -19,6 +25,11 @@ class RiskManager:
         Fast checks run BEFORE heavy analysis.
         Checks: Daily Limit, Cooldown, Spread, News.
         """
+        # 0. Circuit Breaker (Shared State)
+        breaker = self.state.get("circuit_breaker", "CLOSED")
+        if breaker == "OPEN":
+            return False, "Circuit Breaker TRIPPED via Shared Memory"
+
         # 1. Daily Trade Limit
         if self.daily_trades >= settings.MAX_DAILY_TRADES:
             return False, "Daily Limit Reached"
@@ -62,6 +73,7 @@ class RiskManager:
     def record_trade(self, symbol):
         """Updates internal counters after a successful trade."""
         self.daily_trades += 1
+        self.state.set("daily_trades", self.daily_trades)
         self.last_trade_time[symbol] = time.time()
 
     def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0):

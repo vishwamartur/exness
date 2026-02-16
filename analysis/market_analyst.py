@@ -2,6 +2,7 @@
 from analysis.mistral_advisor import MistralAdvisor
 from analysis.regime import RegimeDetector
 from utils.news_filter import is_news_blackout, get_active_events
+from utils.shared_state import SharedState
 
 class MarketAnalyst:
     """
@@ -14,6 +15,7 @@ class MarketAnalyst:
     def __init__(self):
         self.mistral = MistralAdvisor()
         self.regime_detector = RegimeDetector()
+        self.state = SharedState()
         print("[AGENT] MarketAnalyst initialized.")
 
     def check_news(self, symbol):
@@ -44,16 +46,20 @@ class MarketAnalyst:
 
         # 2. Regime Detection
         regime, details = self.regime_detector.get_regime(df_features)
+        
+        # Persist to Shared Memory
+        try:
+            self.state.set(f"regime_{symbol}", {
+                "regime": regime,
+                "details": details,
+                "updated": str(df_features.index[-1])
+            })
+        except: pass
 
         # 3. AI Analysis (only if regime is tradeable)
         sentiment = "NEUTRAL"
         confidence = 0
         reason = "No AI analysis"
-        
-        # We only call AI if we have a potential trade? 
-        # Or do we call it every time? 
-        # Strategies call it on "setup candidate".
-        # So maybe we expose a method `get_ai_opinion`.
         
         return {
             'regime': regime,
