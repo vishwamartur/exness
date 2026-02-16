@@ -53,9 +53,19 @@ class TradeJournal:
                 exit_time TEXT,
                 duration_minutes REAL,
                 outcome TEXT,
-                notes TEXT
+                notes TEXT,
+                researcher_action TEXT,
+                researcher_confidence INTEGER,
+                researcher_reason TEXT
             )
         """)
+
+        # Migration for existing tables
+        try:
+            cursor.execute("ALTER TABLE trades ADD COLUMN researcher_action TEXT")
+            cursor.execute("ALTER TABLE trades ADD COLUMN researcher_confidence INTEGER")
+            cursor.execute("ALTER TABLE trades ADD COLUMN researcher_reason TEXT")
+        except: pass # Columns likely exist
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_summary (
@@ -78,7 +88,8 @@ class TradeJournal:
 
     def log_entry(self, ticket, symbol, direction, lot_size, entry_price,
                   sl_price, tp_price, confluence_score, confluence_details,
-                  rf_probability=0, ai_signal=0, asset_class='forex', session=''):
+                  rf_probability=0, ai_signal=0, asset_class='forex', session='',
+                  researcher_action='NONE', researcher_confidence=0, researcher_reason=''):
         """Logs a new trade entry."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -88,13 +99,15 @@ class TradeJournal:
                 INSERT OR IGNORE INTO trades
                 (ticket, symbol, direction, lot_size, entry_price, sl_price, tp_price,
                  confluence_score, confluence_details, rf_probability, ai_signal,
-                 asset_class, session, entry_time, outcome)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
+                 asset_class, session, entry_time, outcome,
+                 researcher_action, researcher_confidence, researcher_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
             """, (
                 ticket, symbol, direction, lot_size, entry_price, sl_price, tp_price,
                 confluence_score, json.dumps(confluence_details),
                 rf_probability, ai_signal, asset_class, session,
-                datetime.now(timezone.utc).isoformat()
+                datetime.now(timezone.utc).isoformat(),
+                researcher_action, researcher_confidence, researcher_reason
             ))
             conn.commit()
         except Exception as e:

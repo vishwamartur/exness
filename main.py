@@ -55,10 +55,7 @@ def main():
 
     # 3. Initialize Strategy
     strategy = InstitutionalStrategy(client)
-    if not strategy.load_model():
-        print("Could not load RF model. Run train_model.py first! Exiting...")
-        client.shutdown()
-        return
+    # Models loaded by QuantAgent internally
 
     # 4. Start Auto-Trainer (background self-learning)
     trainer = AutoTrainer(strategy, strategy.journal)

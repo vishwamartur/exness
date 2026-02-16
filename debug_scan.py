@@ -3,13 +3,10 @@ import sys
 import os
 import pandas as pd
 import traceback
-from datetime import datetime
 from config import settings
 from execution.mt5_client import MT5Client
 from strategy.institutional_strategy import InstitutionalStrategy
-from strategy import features
 
-# Force verbose logging
 settings.LOG_LEVEL = "DEBUG"
 
 def debug_scan():
@@ -21,8 +18,6 @@ def debug_scan():
 
     print("Initializing Strategy...")
     strategy = InstitutionalStrategy(client)
-    if not strategy.load_model():
-        print("Model load failed (using random fallback for debug)")
     
     symbols = ["EURUSD", "GBPUSD", "XAUUSD"]
     print(f"\nDebugging {symbols}...\n")
@@ -34,83 +29,41 @@ def debug_scan():
         try:
             data = strategy._fetch_symbol_data(symbol)
             if not data:
-                print("  No data fetched.")
+                print("  No data fetched (Cooldown/News/Spread?).")
                 continue
         except Exception:
             traceback.print_exc()
             continue
             
-        df = data[settings.TIMEFRAME] # Dynamic key match
-        
-        # 2. Features
+        # 2. Quant Analysis
         try:
-            df_features = features.add_technical_features(df)
-            last = df_features.iloc[-1]
-        except Exception as e:
-            print(f"  Feature error: {e}")
-            continue
-
-        # 3. Check ML Prob (Directly)
-        try:
-            rf_prob, _ = strategy._get_rf_prediction(df_features)
-            # xgb_prob, _ = strategy._get_xgb_prediction(df_features) # Skip XGB if causing issues
-            ml_prob = rf_prob 
-            if strategy.xgb_model:
-                try:
-                    xgb_prob, _ = strategy._get_xgb_prediction(df_features)
-                    ml_prob = (rf_prob + xgb_prob) / 2
-                except Exception as e:
-                    print(f"  XGB Error: {e}")
-            print(f"  ML Prob (Calculated): {ml_prob:.4f}")
-        except Exception as e:
-            print(f"  ML Calc Error: {e}")
-            ml_prob = 0.5
-
-        # 4. H4 Trend
-        h4_trend = 0
-        try:
-            h4_trend = strategy.get_h4_trend(symbol)
-        except Exception:
-            pass
-        
-        # 5. Score
-        try:
-            # Explicit kwargs to avoid TypeError
-            b_score, b_details = strategy._calculate_confluence(
-                symbol=symbol, 
-                df_features=df_features, 
-                direction="buy", 
-                h4_trend=h4_trend
-            )
-            s_score, s_details = strategy._calculate_confluence(
-                symbol=symbol, 
-                df_features=df_features, 
-                direction="sell", 
-                h4_trend=h4_trend
-            )
+            q_res = strategy.quant.analyze(symbol, data)
+            if not q_res:
+                print("  Quant Analysis Failed.")
+                continue
+                
+            print(f"  Score: {q_res['score']} {q_res['direction']}")
+            print(f"  ML Prob: {q_res['ml_prob']:.4f}")
+            print(f"  Details: {q_res['details']}")
             
-            print(f"  Close: {last['close']:.5f}")
-            print(f"  H4 Trend: {h4_trend}")
-            print(f"  Buy Score:  {b_score} {b_details}")
-            print(f"  Sell Score: {s_score} {s_details}")
+            # 3. Analyst Analysis
+            a_res = strategy.analyst.analyze_session(symbol, q_res['data'])
+            print(f"  Regime: {a_res['regime']}")
             
-            best_score = max(b_score, s_score)
-            
-            # Replicate the Logic
+            # Validation Logic
+            threshold = strategy._get_adaptive_threshold()
             is_valid = False
-            if best_score >= settings.MIN_CONFLUENCE_SCORE:
+            if q_res['score'] >= threshold: 
                 is_valid = True
-                print(f"  -> VALID (Standard Score >= {settings.MIN_CONFLUENCE_SCORE})")
-            elif best_score >= 2 and (ml_prob > 0.85 or ml_prob < 0.15):
+                print(f"  -> VALID (Score >= {threshold})")
+            elif q_res['score'] >= 2 and (q_res['ml_prob'] > 0.85 or q_res['ml_prob'] < 0.15):
                 is_valid = True
-                print(f"  -> VALID (ML Boost Override: Score {best_score} >= 2 & Strong ML)")
+                print(f"  -> VALID (ML Boost)")
             else:
-                print(f"  -> REJECTED. Score {best_score}. ML {ml_prob:.4f}")
-                if best_score >= 2:
-                    print(f"     (Failed ML Boost check: Need > 0.85 or < 0.15)")
+                print(f"  -> REJECTED")
 
         except Exception:
-            print("  Score Calculation Crashed:")
+            print("  Analysis Crashed:")
             traceback.print_exc()
 
     client.shutdown()

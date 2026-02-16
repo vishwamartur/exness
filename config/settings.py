@@ -99,9 +99,9 @@ H4_TREND_FILTER = False  # Disabled to allow ML-based reversals (Scalping)
 
 # ─── Session Awareness (UTC hours) ──────────────────────────────────────
 TRADE_SESSIONS = {
-    "london":    {"start": 8,  "end": 12},  # London session
-    "new_york":  {"start": 13, "end": 17},  # New York session
-    "overlap":   {"start": 13, "end": 16},  # London/NY overlap (best liquidity)
+    "london":    {"start": 8,  "end": 16},  # London (08:00 - 16:00 UTC)
+    "new_york":  {"start": 13, "end": 21},  # New York (13:00 - 21:00 UTC)
+    "overlap":   {"start": 13, "end": 16},  # Overlap
 }
 SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"
 
@@ -115,7 +115,7 @@ XGB_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "model
 USE_XGBOOST = True
 
 # Lag-Llama Settings
-USE_LAG_LLAMA = os.getenv("USE_LAG_LLAMA", "True").lower() == "true"
+USE_LAG_LLAMA = False # os.getenv("USE_LAG_LLAMA", "True").lower() == "true"
 LAG_LLAMA_CHECKPOINT = os.getenv("LAG_LLAMA_CHECKPOINT", "time-series-foundation-models/Lag-Llama")
 LAG_LLAMA_REPO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vendor", "lag-llama")
 

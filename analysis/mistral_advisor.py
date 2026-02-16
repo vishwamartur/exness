@@ -1,9 +1,11 @@
+
 """
-Mistral Advisor
+Mistral Advisor (Async)
 Uses Mistral AI via API to provide qualitative market analysis.
 """
 import os
-import requests
+import aiohttp
+import asyncio
 import json
 from config import settings
 
@@ -22,9 +24,9 @@ class MistralAdvisor:
         except Exception as e:
             print(f"[MISTRAL] failed to init: {e}")
 
-    def analyze_market(self, symbol, timeframe, indicators):
+    async def analyze_market(self, symbol, timeframe, indicators):
         """
-        Sends technical data to Mistral for analysis.
+        Sends technical data to Mistral for analysis (Async).
         """
         if not self.api_key:
             return "NEUTRAL", 0, "No API Key"
@@ -58,28 +60,55 @@ class MistralAdvisor:
             "max_tokens": 100
         }
         
+        return await self._send_request(payload, default_response=("NEUTRAL", 0, "Request Failed"))
+
+    async def send_prompt(self, system_prompt, user_prompt):
+        """Generic method to send prompts to Mistral (Async)."""
+        if not self.api_key:
+            return None
+            
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 500
+        }
+        
+        return await self._send_request(payload, parse_pipe=False)
+
+    async def _send_request(self, payload, default_response=None, parse_pipe=True):
+        """Helper to handle aiohttp requests."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         
         try:
-            response = requests.post(self.url, json=payload, headers=headers, timeout=10)
-            if response.status_code != 200:
-                print(f"[MISTRAL] API Error {response.status_code}: {response.text}")
-                return "NEUTRAL", 0, f"HTTP {response.status_code}"
-                
-            result = response.json()
-            # Parse Mistral response structure
-            try:
-                content = result['choices'][0]['message']['content']
-                data = content.strip().split('|')
-                if len(data) == 3:
-                    return data[0].strip(), int(data[1].strip()), data[2].strip()
-                return "NEUTRAL", 0, "Format Error"
-            except (KeyError, IndexError):
-                return "NEUTRAL", 0, "Parse Error"
-                
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.url, json=payload, headers=headers, timeout=15) as response:
+                    if response.status != 200:
+                        text = await response.text()
+                        print(f"[MISTRAL] API Error {response.status}: {text}")
+                        return default_response if default_response else None
+                    
+                    result = await response.json()
+                    
+                    if not parse_pipe:
+                        return result['choices'][0]['message']['content']
+                        
+                    # Parse Pipe Format
+                    try:
+                        content = result['choices'][0]['message']['content']
+                        data = content.strip().split('|')
+                        if len(data) == 3:
+                            return data[0].strip(), int(data[1].strip()), data[2].strip()
+                        return "NEUTRAL", 0, "Format Error"
+                    except (KeyError, IndexError):
+                        return "NEUTRAL", 0, "Parse Error"
+
         except Exception as e:
             print(f"[MISTRAL] Request Failed: {e}")
-            return "NEUTRAL", 0, str(e)
+            return default_response if default_response else None
