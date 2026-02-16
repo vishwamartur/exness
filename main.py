@@ -63,8 +63,11 @@ def main():
     trainer = AutoTrainer(strategy, strategy.journal)
     trainer.start()
     
-    # 5. Start WebSocket Stream Server
-    stream.start_server(port=8000)
+    # 5. Start Stream Server (auto-port 8000-8009)
+    try:
+        stream.start_server(base_port=8000)
+    except Exception as e:
+        print(f"[ERROR] Stream Server failed: {e}")
         
     print(f"\nScanner ready. {len(settings.SYMBOLS)} instruments | "
           f"Self-learning active | Trade journal active\n")

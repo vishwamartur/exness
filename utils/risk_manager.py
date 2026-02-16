@@ -64,12 +64,13 @@ class RiskManager:
         self.daily_trades += 1
         self.last_trade_time[symbol] = time.time()
 
-    def calculate_position_size(self, symbol, sl_pips, confluence_score):
+    def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0):
         """
         Calculates dynamic lot size based on risk percent and confluence.
         High Confluence (6+) -> Max Risk
         Medium (5) -> Avg Risk
         Low (3-4) -> Min Risk
+        scaling_factor: Float (0.0-1.0) to reduce size (e.g. Volatile regime)
         """
         base_risk = settings.RISK_PERCENT 
         max_risk = settings.MAX_RISK_PERCENT
@@ -80,6 +81,9 @@ class RiskManager:
             risk_pct = (base_risk + max_risk) / 2
         else:
             risk_pct = base_risk
+            
+        # Apply regime scaling
+        risk_pct *= scaling_factor
             
         # Ensure we have client reference to calculate
         if self.client:

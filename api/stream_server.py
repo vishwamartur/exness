@@ -67,14 +67,30 @@ def read_root():
 _server_thread = None
 _loop = None
 
-def start_server(host="0.0.0.0", port=8000):
-    """Starts the Uvicorn server in a separate thread."""
-    def run():
-        # Uvicorn run blocking
-        uvicorn.run(app, host=host, port=port, log_level="warning")
+def start_server(host="0.0.0.0", base_port=8000):
+    """Starts the Uvicorn server in a separate thread, finding an open port."""
+    
+    def run(port):
+        try:
+            uvicorn.run(app, host=host, port=port, log_level="warning")
+        except Exception as e:
+            logger.error(f"Server failed on port {port}: {e}")
+
+    # Simple port finder
+    import socket
+    port = base_port
+    for p in range(base_port, base_port + 10):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # Bind check is more reliable than connect check for availability
+            try:
+                s.bind((host, p))
+                port = p
+                break
+            except OSError:
+                continue
     
     global _server_thread
-    _server_thread = threading.Thread(target=run, daemon=True)
+    _server_thread = threading.Thread(target=run, args=(port,), daemon=True)
     _server_thread.start()
     logger.info(f"Stream Server started on ws://{host}:{port}/ws")
 

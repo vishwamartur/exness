@@ -74,7 +74,7 @@ ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))  # TP = 3.0x ATR 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 4))  # Minimum 4 confluences to enter
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Sureshot mode: only 5+ score fires
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.65))   # Stricter RF threshold
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.70))   # Stricter RF threshold (was 0.65)
 
 # ─── Trade Management ────────────────────────────────────────────────────
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 5 minutes between trades

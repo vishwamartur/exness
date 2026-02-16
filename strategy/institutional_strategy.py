@@ -30,6 +30,8 @@ import time
 import xgboost as xgb
 from api import stream_server as stream
 from utils.risk_manager import RiskManager
+from analysis.regime import RegimeDetector
+from analysis.gemini_advisor import GeminiAdvisor
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -104,6 +106,8 @@ class InstitutionalStrategy:
     def __init__(self, mt5_client):
         self.client = mt5_client
         self.risk_manager = RiskManager(mt5_client)
+        self.regime_detector = RegimeDetector()
+        self.gemini = GeminiAdvisor()
         self.model = None       # Random Forest
         self.xgb_model = None   # XGBoost
         self.feature_cols = None
@@ -383,6 +387,17 @@ class InstitutionalStrategy:
         sl_distance = atr * settings.ATR_SL_MULTIPLIER
         tp_distance = atr * settings.ATR_TP_MULTIPLIER
 
+        # ─── Market Regime Check ─────────────────────────────────────────────
+        regime, regime_details = self.regime_detector.get_regime(df_features)
+        
+        # Adaptive Logic:
+        # 1. RANGING: Skip trading (Trend bot hates chop)
+        if regime == "RANGING":
+            return None
+        
+        # 2. VOLATILE: Reduce risk by 50%
+        scaling_factor = 0.5 if regime == "VOLATILE" else 1.0
+
         # Pre-compute H1/H4 trends from pre-fetched data
         h1_trend = self._compute_trend(data_dict.get('H1'))
         h4_trend = self._compute_trend(data_dict.get('H4'))
@@ -394,9 +409,44 @@ class InstitutionalStrategy:
             symbol, df_features, "sell", h1_trend=h1_trend, h4_trend=h4_trend)
 
         rf_prob, _ = self._get_rf_prediction(df_features)
+        xgb_prob, _ = self._get_xgb_prediction(df_features)
+        ml_prob = (rf_prob + xgb_prob) / 2 if self.xgb_model else rf_prob
+
+        # ─── ML Confidence Filter ────────────────────────────────────────────
+        # "No Trade Zone": Skip if (1-Threshold) < prob < Threshold
+        # E.g. if Threshold=0.70, skip if 0.30 < prob < 0.70
+        threshold = settings.RF_PROB_THRESHOLD
+        if (1.0 - threshold) < ml_prob < threshold:
+            return None
+
         ai_signal = self._get_ai_signal(symbol, df_features)
         best_score = max(buy_score, sell_score)
-        ensemble = self._ensemble_vote(rf_prob, ai_signal, best_score)
+        ensemble = self._ensemble_vote(ml_prob, ai_signal, best_score)
+        direction = "BUY" if buy_score >= sell_score else "SELL"
+
+        # ─── Gemini AI Analysis (Second Opinion) ─────────────────────────────
+        gemini_reason = ""
+        if best_score >= settings.MIN_CONFLUENCE_SCORE:  # Only check viable setups
+            # Prepare indicators for LLM
+            indicators = {
+                'close': float(last['close']),
+                'adx': float(last.get('adx', 0)),
+                'rsi': float(last.get('rsi', 0)),
+                'regime': regime,
+                'ml_prob': float(ml_prob),
+                'h4_trend': h4_trend
+            }
+            sentiment, confidence, reason = self.gemini.analyze_market(symbol, "M15", indicators)
+            gemini_reason = f"{sentiment} ({confidence}%): {reason}"
+            print(f"[GEMINI] {symbol}: {gemini_reason}")
+            
+            # Veto Power: If Gemini is strongly against, block it
+            if direction == "BUY" and sentiment == "BEARISH" and confidence > 80:
+                print(f"[GEMINI] VETO -> Blocking BUY on {symbol}")
+                return None
+            if direction == "SELL" and sentiment == "BULLISH" and confidence > 80:
+                print(f"[GEMINI] VETO -> Blocking SELL on {symbol}")
+                return None
 
         # Prepare stream data
         stream_data = {
@@ -410,6 +460,8 @@ class InstitutionalStrategy:
             'atr': float(atr),
             'adx': float(last.get('adx', 0)),
             'rsi': float(last.get('rsi', 0)),
+            'regime': regime,
+            'gemini': gemini_reason,
             'is_setup': best_score >= settings.MIN_CONFLUENCE_SCORE
         }
         try:
@@ -430,6 +482,8 @@ class InstitutionalStrategy:
                 'sl_distance': sl_distance,
                 'tp_distance': tp_distance,
                 'atr': atr,
+                'scaling_factor': scaling_factor,
+                'regime': regime,
                 'df_features': df_features,
             }
         elif sell_score > buy_score and sell_score >= settings.MIN_CONFLUENCE_SCORE:
@@ -444,6 +498,8 @@ class InstitutionalStrategy:
                 'sl_distance': sl_distance,
                 'tp_distance': tp_distance,
                 'atr': atr,
+                'scaling_factor': scaling_factor,
+                'regime': regime,
                 'df_features': df_features,
             }
         
@@ -465,7 +521,8 @@ class InstitutionalStrategy:
             return
 
         # 2. Dynamic Position Sizing
-        lot = self.risk_manager.calculate_position_size(symbol, sl_distance, score)
+        scaling = setup.get('scaling_factor', 1.0)
+        lot = self.risk_manager.calculate_position_size(symbol, sl_distance, score, scaling_factor=scaling)
 
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
@@ -697,17 +754,22 @@ class InstitutionalStrategy:
         details = {}
         last = df_features.iloc[-1]
 
-        # 1. H4 Trend (use pre-computed if available)
+        # 1. H4 Trend Veto (Strict)
         if settings.H4_TREND_FILTER:
             h4 = h4_trend if h4_trend is not None else self.get_h4_trend(symbol)
-            if direction == "buy" and h4 >= 1:
-                score += 1
-                details['H4'] = '✓'
-            elif direction == "sell" and h4 <= -1:
+            
+            # Immediate rejection if fighting the H4 trend
+            if direction == "buy" and h4 == -1:
+                return 0, {'H4': 'BLOCK (DownTrend)'}
+            elif direction == "sell" and h4 == 1:
+                return 0, {'H4': 'BLOCK (UpTrend)'}
+
+            # Bonus for alignment
+            if (direction == "buy" and h4 == 1) or (direction == "sell" and h4 == -1):
                 score += 1
                 details['H4'] = '✓'
             else:
-                details['H4'] = '✗'
+                details['H4'] = '-'
 
         # 2. H1 Trend (use pre-computed if available)
         if settings.H1_TREND_FILTER:
