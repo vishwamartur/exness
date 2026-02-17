@@ -326,12 +326,20 @@ class InstitutionalStrategy:
             self.risk_manager.record_trade(symbol)
             self.last_trade_time[symbol] = time.time()
             
-            self.journal.log_trade(
-                symbol=symbol, direction=direction, lot_size=lot,
-                entry_price=price, sl_price=sl, tp_price=tp,
-                confluence_score=score, confluence_details=setup['details'],
-                rf_probability=setup['ml_prob'], ai_signal=setup['ai_signal'],
-                asset_class=_get_asset_class(symbol), session=self._get_current_session(),
+            self.journal.log_entry(
+                ticket=res.order,
+                symbol=symbol, 
+                direction=direction, 
+                lot_size=lot,
+                entry_price=price, 
+                sl_price=sl, 
+                tp_price=tp,
+                confluence_score=score, 
+                confluence_details=setup['details'],
+                rf_probability=setup['ml_prob'], 
+                ai_signal=setup['ai_signal'],
+                asset_class=_get_asset_class(symbol), 
+                session=self._get_current_session(),
                 researcher_action=setup.get('researcher_action', 'NONE'),
                 researcher_confidence=setup.get('researcher_confidence', 0),
                 researcher_reason=setup.get('researcher_reason', 'N/A')
