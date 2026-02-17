@@ -1,6 +1,7 @@
 import torch
 import sys
 import os
+import numpy as np
 import pandas as pd
 from huggingface_hub import hf_hub_download
 from gluonts.dataset.common import ListDataset
@@ -52,29 +53,72 @@ class LagLlamaPredictor:
                  # Download from HF
                  ckpt_file = hf_hub_download(repo_id=self.ckpt_path, filename="lag-llama.ckpt")
             
-            # Initialize Estimator
-            # We use a default configuration that matches the pretrained model
-            # The context length and prediction length here define the structure for the lightning module
-            # but for zeroshot forecasting, Lag-Llama handles variable context.
-            # Deduce lags_seq to match feature_size=512
-            # feature_size = 1 * L + 2 + 6 = 512 => L = 504
-            # We construct a dummy lags_seq of length 504.
-            # The exact values matter for prediction inputs, but for weight loading, only length matters.
-            # Ideally we should recover the exact lags_seq from the checkpoint, but unpickling failed.
-            # For now, we use a range. This might degrade performance if lags are specific (e.g. exponential).
-            # But getting it to load is step 1.
-            # Correct configuration matching the checkpoint
-            # Checkpoint trained with ["Q", "M", "W", "D", "H", "T", "S"] which yields 84 unique lags.
-            # 84 lags + 2 static + 6 time features = 92 input features.
-            # Layers = 8 (based on missing keys from checkpoint)
-            lags_seq = ["Q", "M", "W", "D", "H", "T", "S"]
+            # Monkeypatch torch.load to force weights_only=False for the initial load too
+            # We need to inspect the checkpoint to determine configuration
+            original_load = torch.load
+            def safe_load(*args, **kwargs):
+                if 'weights_only' not in kwargs:
+                    kwargs['weights_only'] = False
+                return original_load(*args, **kwargs)
+            torch.load = safe_load
+            
+            try:
+                 print(f"Inspecting weights from {ckpt_file}...")
+                 ckpt = torch.load(ckpt_file, map_location=self.device)
+            finally:
+                 torch.load = original_load
+
+            if "state_dict" in ckpt:
+                state_dict = ckpt["state_dict"]
+            elif "model_state_dict" in ckpt:
+                state_dict = ckpt["model_state_dict"]
+            else:
+                state_dict = ckpt
+            
+            # Deduce configuration from state_dict
+            n_layer = 8 # Default
+            max_layer = -1
+            for k in state_dict.keys():
+                # Look for model.layers.X
+                # Keys might start with "model." or just "layers." depending on how it was saved
+                parts = k.split('.')
+                for i, p in enumerate(parts):
+                    if p == 'layers' and i + 1 < len(parts) and parts[i].isdigit():
+                        # The code above had a typo in condition, fixing logic:
+                        # We want parts[i] == 'layers' and check parts[i+1]
+                        pass
+                
+                # Simpler regex-like logic
+                if 'layers.' in k:
+                    # extract the number after layers.
+                    try:
+                        # split by . and find the part after 'layers'
+                        parts = k.split('.')
+                        if 'layers' in parts:
+                            idx = parts.index('layers')
+                            if idx + 1 < len(parts) and parts[idx+1].isdigit():
+                                layer_idx = int(parts[idx+1])
+                                if layer_idx > max_layer:
+                                    max_layer = layer_idx
+                    except:
+                        pass
+            
+            if max_layer >= 0:
+                n_layer = max_layer + 1
+                print(f"Deduced n_layer={n_layer} from checkpoint.")
+            else:
+                print(f"Could not deduce n_layer, using default {n_layer}.")
+
+            # Checkpoint trained with ["Q", "M", "W", "D", "H", "T", "S"]
+            # Updated to "Q-DEC" to avoid invalid frequency errors in newer pandas
+            lags_seq = ["Q-DEC", "M", "W", "D", "H", "T", "S"]
 
             estimator = LagLlamaEstimator(
                 prediction_length=self.prediction_length,
                 context_length=self.context_length,
                 
                 # Parameters matching the checkpoint
-                n_layer=8, 
+                n_layer=n_layer, 
                 n_head=4,
                 n_embd_per_head=36,
                 lags_seq=lags_seq,
@@ -94,35 +138,11 @@ class LagLlamaPredictor:
                 module = estimator.create_lightning_module()
             except Exception as e:
                 print(f"Error creating lightning module: {e}")
-                # Try to clean up monkeypatch if it failed?
-                # But we didn't monkeypatch here, we did it inside estimator code previously?
-                # No, we removed monkeypatch from estimator.
-                # We monkeypatched torch.load below?
                 raise e
 
             # Manual loading of weights
-            print(f"Manually loading weights from {ckpt_file}...")
-            
-            # Monkeypatch torch.load to force weights_only=False
-            original_load = torch.load
-            def safe_load(*args, **kwargs):
-                if 'weights_only' not in kwargs:
-                    kwargs['weights_only'] = False
-                return original_load(*args, **kwargs)
-            torch.load = safe_load
-            
-            try:
-                 ckpt = torch.load(ckpt_file, map_location=self.device)
-            finally:
-                 torch.load = original_load
+            print(f"Manually loading weights...")
                  
-            if "state_dict" in ckpt:
-                state_dict = ckpt["state_dict"]
-            elif "model_state_dict" in ckpt:
-                state_dict = ckpt["model_state_dict"]
-            else:
-                state_dict = ckpt
-                
             model_state = module.state_dict()
             new_state = {}
             for k, v in state_dict.items():

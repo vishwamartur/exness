@@ -25,6 +25,10 @@ class TradeJournal:
         self.db_path = db_path
         self._init_db()
 
+    def log_trade(self, *args, **kwargs):
+        """Alias for log_entry to fix legacy calls."""
+        return self.log_entry(*args, **kwargs)
+
     def _init_db(self):
         """Creates tables if they don't exist."""
         conn = sqlite3.connect(self.db_path)

@@ -237,12 +237,12 @@ class QuantAgent:
             if direction=="buy" and h4==-1: return 0, {'H4':'BLOCK'}
             if direction=="sell" and h4==1: return 0, {'H4':'BLOCK'}
             if (direction=="buy" and h4==1) or (direction=="sell" and h4==-1):
-                score+=1; details['H4']='✓'
+                score+=1; details['H4']='OK'
             else: details['H4']='-'
             
         if settings.H1_TREND_FILTER:
             if (direction=="buy" and h1>=1) or (direction=="sell" and h1<=-1):
-                score+=1; details['H1']='✓'
+                score+=1; details['H1']='OK'
             else: details['H1']='-'
             
         # ML & AI
@@ -252,18 +252,18 @@ class QuantAgent:
         # I'll re-call or optimize later. Re-calling is cheap (cached in memory if efficient, but here it's fast)
         
         if direction=="buy":
-            if prob > 0.85: score+=2; details['ML']='✓✓'
-            elif prob > threshold: score+=1; details['ML']='✓'
-            else: details['ML']='✗'
+            if prob > 0.85: score+=2; details['ML']='OK+'
+            elif prob > threshold: score+=1; details['ML']='OK'
+            else: details['ML']='NO'
         else:
-            if prob < 0.15: score+=2; details['ML']='✓✓'
-            elif prob < (1-threshold): score+=1; details['ML']='✓'
-            else: details['ML']='✗'
+            if prob < 0.15: score+=2; details['ML']='OK+'
+            elif prob < (1-threshold): score+=1; details['ML']='OK'
+            else: details['ML']='NO'
             
         ai = self._get_ai_signal(symbol, df)
         if (direction=="buy" and ai==1) or (direction=="sell" and ai==-1):
-            score+=1; details['AI']='✓'
-        else: details['AI']='✗'
+            score+=1; details['AI']='OK'
+        else: details['AI']='NO'
         
         # SMC Confluence
         smc_hit = False
@@ -274,11 +274,11 @@ class QuantAgent:
             if last.get('near_ob_bearish', 0) == 1 or last.get('near_fvg_bearish', 0) == 1: smc_hit = True
             if last.get('liq_sweep_high', 0) == 1: smc_hit = True
             
-        if smc_hit: score+=1; details['SMC']='✓'
-        else: details['SMC']='✗'
+        if smc_hit: score+=1; details['SMC']='OK'
+        else: details['SMC']='NO'
         
         # ADX
-        if last.get('adx',0) > 25: score+=1; details['ADX']='✓'
-        else: details['ADX']='✗'
+        if last.get('adx',0) > 25: score+=1; details['ADX']='OK'
+        else: details['ADX']='NO'
         
         return score, details

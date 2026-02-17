@@ -66,7 +66,7 @@ class LSTMPredictor:
                     num_layers=self.num_layers, 
                     device=self.device
                 )
-                self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
+                self.model.load_state_dict(torch.load(self.model_path, map_location=self.device, weights_only=True))
                 self.model.to(self.device)
                 self.model.eval()
                 print("LSTM Model loaded successfully.")

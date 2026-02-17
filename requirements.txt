@@ -9,7 +9,7 @@ torch
 transformers
 accelerate
 huggingface_hub
-gluonts
+gluonts<=0.14.4
 scipy
 ujson
 aiohttp
