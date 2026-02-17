@@ -19,7 +19,10 @@ class HFPredictor:
             
         print(f"Loading HF Model: {model_name}...")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {self.device}")
+        if self.device == "cuda":
+            print(f"HF Predictor using acceleration: {torch.cuda.get_device_name(0)}")
+        else:
+            print(f"HF Predictor using device: {self.device}")
         
         self.pipeline = ChronosPipeline.from_pretrained(
             model_name,

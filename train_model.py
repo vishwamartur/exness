@@ -1,5 +1,5 @@
 """
-Train RF Model — Updated for M15 institutional strategy.
+Train RF Model - Updated for M15 institutional strategy.
 
 Changes from original M1 version:
 - Uses M15 timeframe data
@@ -104,7 +104,7 @@ def apply_fixed_barrier(df, time_horizon=20):
 
 
 def train():
-    # 1. Fetch Data — M15 with maximum history
+    # 1. Fetch Data - M15 with maximum history
     print(f"Fetching {settings.HISTORY_BARS} bars of M15 data for {settings.SYMBOL}...")
     if not loader.initial_connect():
         print("Failed to connect to MT5.")
@@ -150,7 +150,7 @@ def train():
     
     print(f"Training on {len(X)} samples with {len(feature_cols)} features")
     
-    # 5. Time-based split (no shuffle — respects temporal order)
+    # 5. Time-based split (no shuffle - respects temporal order)
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, shuffle=False
     )

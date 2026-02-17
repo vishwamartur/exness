@@ -30,6 +30,11 @@ except ImportError as e:
 class LagLlamaPredictor:
     def __init__(self, ckpt_path="time-series-foundation-models/Lag-Llama", device="cuda"):
         self.device = device
+        
+        if self.device.startswith("cuda") and torch.cuda.is_available():
+             print(f"Lag-Llama initialized on GPU: {torch.cuda.get_device_name(0)}")
+        else:
+             print(f"Lag-Llama initialized on device: {self.device}")
         self.ckpt_path = ckpt_path
         self.prediction_length = 20 # Default, will be overridden or used as base
         self.context_length = 32 # Default

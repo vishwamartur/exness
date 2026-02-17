@@ -69,7 +69,7 @@ MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 5.0))  # Max risk for A+ 
 
 # ATR-Based Dynamic SL/TP (replaces fixed pips)
 ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))  # SL = 1.5x ATR
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))  # TP = 3.0x ATR (2:1 R:R)
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR (Higher Reward)
 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
@@ -85,13 +85,16 @@ MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-sprea
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 50.0))  # Wider for crypto
 MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 10.0))  # Commodities
 
-# Trailing Stop (institutional targets)
-TRAILING_STOP_ACTIVATE_PERCENT = float(os.getenv("TRAILING_ACTIVATE", 0.01))  # 1% profit activation
-TRAILING_STOP_STEP_PERCENT = float(os.getenv("TRAILING_STEP", 0.002))         # 0.2% step
+# Trailing Stop (ATR Based)
+TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR
+TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 0.5))         # Trail behind by 0.5 ATR
+# Legacy Fixed % (keeping for backwards compatibility if needed, but primary is ATR)
+TRAILING_STOP_ACTIVATE_PERCENT = float(os.getenv("TRAILING_ACTIVATE", 0.005))
+TRAILING_STOP_STEP_PERCENT = float(os.getenv("TRAILING_STEP", 0.001))
 
 # Partial Profit Taking
-PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.5))  # Close 50% at first TP
-BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 1.0))  # Move SL to breakeven at 1:1 R:R
+PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.25))  # Close 25% (Let winners run)
+BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 0.8))  # Move SL to breakeven at 0.8R (Was 0.6R)
 
 # ─── Multi-Timeframe Trend Filters ───────────────────────────────────────
 H1_TREND_FILTER = True

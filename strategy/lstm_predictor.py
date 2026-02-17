@@ -7,8 +7,17 @@ from sklearn.preprocessing import MinMaxScaler
 from strategy.lstm_model import BiLSTMWithAttention
 
 class LSTMPredictor:
-    def __init__(self, model_path, scaler_path, device='cpu', sequence_length=60, hidden_size=64, num_layers=2):
-        self.device = device
+    def __init__(self, model_path, scaler_path, device=None, sequence_length=60, hidden_size=64, num_layers=2):
+        if device is None:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
+            
+        if self.device == 'cuda' and torch.cuda.is_available():
+            print(f"LSTM initialized on GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            print(f"LSTM initialized on device: {self.device}")
+
         self.sequence_length = sequence_length
         self.hidden_size = hidden_size
         self.num_layers = num_layers

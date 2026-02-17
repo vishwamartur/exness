@@ -1,5 +1,5 @@
 """
-Train XGBoost Model — Institutional Strategy Ensemble
+Train XGBoost Model - Institutional Strategy Ensemble
 Works alongside Random Forest to validate patterns.
 
 - Uses same M15 institutional features.
@@ -129,7 +129,9 @@ def train():
         random_state=42,
         n_jobs=-1,
         eval_metric='logloss',
-        early_stopping_rounds=20
+        early_stopping_rounds=20,
+        device='cuda', # Use GPU
+        tree_method='hist' # Auto-selected with device='cuda'
     )
     
     # Use evaluation set for early stopping

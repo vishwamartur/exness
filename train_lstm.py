@@ -1,5 +1,5 @@
 """
-Train LSTM — Multi-symbol support.
+Train LSTM - Multi-symbol support.
 
 Trains separate LSTM models for key instruments:
 - EURUSD (default)
@@ -54,7 +54,7 @@ def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
     print(f"  TRAINING LSTM: {symbol} on {timeframe}")
     print(f"{'='*50}")
     
-    # 1. Load Data — use M15 to match live strategy
+    # 1. Load Data - use M15 to match live strategy
     df = loader.get_historical_data(symbol, timeframe, settings.HISTORY_BARS)
     if df is None or len(df) < 200:
         print(f"Failed to load sufficient data for {symbol}. Skipping.")
@@ -114,6 +114,8 @@ def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
     # 8. Initialize Model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
+    if device.type == 'cuda':
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
     
     model = BiLSTMWithAttention(
         input_size=X.shape[1],
@@ -180,7 +182,7 @@ def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
                 print(f"Early stopping at epoch {epoch+1}")
                 break
     
-    print(f"✓ {symbol} training complete. Best val loss: {best_loss:.6f}")
+    print(f"[OK] {symbol} training complete. Best val loss: {best_loss:.6f}")
     return True
 
 

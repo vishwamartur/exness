@@ -57,6 +57,10 @@ class QuantAgent:
             
             if getattr(settings, 'USE_XGBOOST', False) and os.path.exists(settings.XGB_MODEL_PATH):
                 self.xgb_model = joblib.load(settings.XGB_MODEL_PATH)
+                # Optimize for single-row inference and avoid warning
+                try:
+                    self.xgb_model.get_booster().set_param({'device': 'cpu'})
+                except: pass
                 
             feat_path = settings.MODEL_PATH.replace('.pkl', '_features.pkl')
             if os.path.exists(feat_path):

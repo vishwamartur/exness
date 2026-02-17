@@ -1,5 +1,5 @@
 """
-Institutional Trading Strategy — v2.1 Agentic Architecture
+Institutional Trading Strategy - v2.1 Agentic Architecture
 ==========================================================
 Transitioned to Multi-Agent System (Phase 2):
 1. Quant Agent: Handles ML (RF/XGB/LSTM) and Signal Generation.
@@ -53,27 +53,27 @@ class InstitutionalStrategy:
         self.client = mt5_client
         self.on_event = on_event
         
-        # ─── AGENTS ──────────────────────────────────────────────────────
+        # --- AGENTS ------------------------------------------------------
         self.risk_manager = RiskManager(mt5_client)
         self.analyst = MarketAnalyst()
         self.quant = QuantAgent()
         self.researcher = ResearcherAgent()
         self.critic = CriticAgent(on_event=on_event)
         
-        # ─── STATE ───────────────────────────────────────────────────────
+        # --- STATE -------------------------------------------------------
         self.last_trade_time = {}
         self.daily_trade_count = 0
         self.last_reset_date = datetime.now(timezone.utc).date()
         self.last_candle_time = {} 
         self.last_critic_run = 0 
 
-        # ─── INFRASTRUCTURE ──────────────────────────────────────────────
+        # --- INFRASTRUCTURE ----------------------------------------------
         self.cache = DataCache()
         self.journal = TradeJournal()
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # =======================================================================
     #  SCANNER LOOP (Orchestrator)
-    # ═══════════════════════════════════════════════════════════════════════
+    # =======================================================================
 
     async def run_scan_loop(self):
         # 0. Manage Positions (Risk Agent)
@@ -105,7 +105,7 @@ class InstitutionalStrategy:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
 
-        # ── Phase 1: Parallel Fetch ──
+        # -- Phase 1: Parallel Fetch --
         # Filter symbols first
         valid_symbols = []
         for symbol in settings.SYMBOLS:
@@ -129,7 +129,7 @@ class InstitutionalStrategy:
             print("[SCANNER] No data.")
             return
 
-        # ── Phase 2: Parallel Scoring (Agents) ──
+        # -- Phase 2: Parallel Scoring (Agents) --
         candidates = []
         skipped = 0
         
@@ -153,16 +153,16 @@ class InstitutionalStrategy:
             candidates.sort(key=lambda x: (x['score'], x['ml_prob']), reverse=True)
             
             # Print top 5
-            print(f"\n{'─'*70}")
+            print(f"\n{'-'*70}")
             print(f"  {'Symbol':>10} | {'Dir':>4} | Sc | Ens  | ML   | Details")
-            print(f"{'─'*70}")
+            print(f"{'-'*70}")
             for c in candidates[:5]:
                 det = ' '.join(f"{k}:{v}" for k,v in c['details'].items())
                 print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {det}")
             
             best = candidates[0]
             
-            # ─── AGENT DEBATE (Researcher) ───────────────────────────────
+            # --- AGENT DEBATE (Researcher) -------------------------------
             print(f"\n[RESEARCHER] Reviewing best candidate: {best['symbol']}...")
             if self.on_event:
                 self.on_event({
@@ -210,14 +210,14 @@ class InstitutionalStrategy:
                     best['researcher_reason'] = research['reason']
                     self._execute_trade(best)
                 else:
-                    print(f"  ❌ Candidate rejected by Researcher.")
+                    print(f"  [X] Candidate rejected by Researcher.")
             except Exception as e:
                 print(f"[ERROR] Researcher failed: {e}. Skipping trade.")
                 
         else:
             print("[SCANNER] No valid setups.")
 
-        # ── Phase 3: Self-Reflection (Critic) ──
+        # -- Phase 3: Self-Reflection (Critic) --
         if time.time() - self.last_critic_run > 300: # Run every 5 mins
             asyncio.create_task(self.critic.analyze_closed_trades())
             self.last_critic_run = time.time()
@@ -313,7 +313,7 @@ class InstitutionalStrategy:
         
         res = self.client.place_order(cmd, symbol, lot, sl, tp)
         if res:
-            print(f"✅ ORDER FILLED: {symbol}")
+            print(f"[OK] ORDER FILLED: {symbol}")
             if self.on_event:
                 self.on_event({
                     "type": "TRADE_EXECUTION",
@@ -339,13 +339,31 @@ class InstitutionalStrategy:
             self.daily_trade_count += 1
 
     def manage_positions(self, symbol):
-        """Delegates to Risk Agent."""
+        """Delegates to Risk Agent. Passing ATR for dynamic management."""
         pos = self.client.get_positions(symbol)
         if not pos: return
         tick = mt5.symbol_info_tick(symbol)
         if not tick: return
         
-        actions = self.risk_manager.monitor_positions(symbol, pos, tick)
+        # Get ATR for dynamic trailing stop
+        atr = 0.0
+        try:
+            # Use data cache to get recent bars
+            df = self.cache.get(symbol, settings.TIMEFRAME, 50)
+            if df is not None and not df.empty:
+                # Ensure technical features are added
+                if 'atr' not in df.columns:
+                    df = features.add_technical_features(df)
+                    
+                atr = df['atr'].iloc[-1]
+                # Fallback if ATR is 0 or NaN
+                if pd.isna(atr) or atr <= 0:
+                    atr = 0.0
+        except Exception as e:
+            print(f"[{symbol}] Failed to get ATR for Risk Manager: {e}")
+            atr = 0.0
+        
+        actions = self.risk_manager.monitor_positions(symbol, pos, tick, atr=atr)
         for act in actions:
             try:
                 if act['type'] == 'MODIFY':
@@ -357,7 +375,7 @@ class InstitutionalStrategy:
             except Exception as e:
                 print(f"[{symbol}] Risk Action Failed: {e}")
 
-    # ─── HELPERS ─────────────────────────────────────────────────────────
+    # --- HELPERS ---------------------------------------------------------
 
     def _is_new_candle(self, symbol):
         df = self.cache.get(symbol, settings.TIMEFRAME, 10)

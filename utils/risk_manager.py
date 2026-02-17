@@ -102,17 +102,19 @@ class RiskManager:
             return self.client.calculate_lot_size(symbol, sl_pips, risk_pct)
         return 0.01
 
-    def monitor_positions(self, symbol, positions, current_tick):
+    def monitor_positions(self, symbol, positions, current_tick, atr=None):
         """
         Monitors open positions for exit conditions (Trailing Stop, BE, Partial).
         Returns a list of actions to execute.
         Action format: {'type': 'MODIFY'|'PARTIAL', 'ticket': int, ...}
+        
+        atr: Average True Range (optional but recommended for dynamic trailing)
         """
         actions = []
         if not positions or not current_tick:
             return actions
 
-        # Initialize tracking sets if not present (handled in __init__ in future, but safe check here)
+        # Initialize tracking sets if not present
         if not hasattr(self, 'breakeven_set'): self.breakeven_set = set()
         if not hasattr(self, 'partial_closed'): self.partial_closed = set()
 
@@ -127,10 +129,14 @@ class RiskManager:
                 risk = entry_price - current_sl if current_sl > 0 else 0
                 profit = current_price - entry_price
 
-                # 1. Break-Even
+                # 1. Break-Even (Risk Free)
+                # Move to slightly ABOVE entry to cover fees
                 if (risk > 0 and profit >= risk * settings.BREAKEVEN_RR and
                     ticket not in self.breakeven_set):
-                    be_sl = entry_price + (risk * 0.1)
+                    
+                    # Target: Entry + 10% of risk (buffer)
+                    be_sl = entry_price + (risk * 0.1) 
+                    
                     if be_sl > current_sl:
                         actions.append({
                             'type': 'MODIFY', 'ticket': ticket, 
@@ -138,26 +144,47 @@ class RiskManager:
                         })
                         self.breakeven_set.add(ticket)
 
-                # 2. Partial Close
+                # 2. Partial Close (Bank Profits)
+                # Logic: If 50% to TP, close partial fraction
                 if (current_tp > 0 and ticket not in self.partial_closed):
                     tp_dist = current_tp - entry_price
-                    if profit >= tp_dist * 0.5:
+                    # If we are 60% of the way to TP, take some off
+                    if profit >= tp_dist * 0.6: 
                         actions.append({
                             'type': 'PARTIAL', 'ticket': ticket, 
                             'fraction': settings.PARTIAL_CLOSE_FRACTION, 'reason': 'Partial Profit'
                         })
                         self.partial_closed.add(ticket)
 
-                # 3. Trailing Stop
+                # 3. Trailing Stop (Dynamic ATR or Fixed %)
                 if entry_price > 0:
-                    profit_pct = profit / entry_price
-                    if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
-                        new_sl = current_price - (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
-                        if new_sl > current_sl:
-                            actions.append({
-                                'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': new_sl, 'tp': current_tp, 'reason': 'Trailing Stop'
-                            })
+                    new_sl = None
+                    reason = ""
+                    
+                    # Preference: ATR Based
+                    if atr and atr > 0:
+                        # Activate if profit > 2 ATR (settings.TRAILING_STOP_ATR_ACTIVATE)
+                        if profit >= settings.TRAILING_STOP_ATR_ACTIVATE * atr:
+                            # Trail behind by 0.5 ATR (settings.TRAILING_STOP_ATR_STEP)
+                            proposed_sl = current_price - (settings.TRAILING_STOP_ATR_STEP * atr)
+                            if proposed_sl > current_sl:
+                                new_sl = proposed_sl
+                                reason = f"Trailing Stop (ATR {atr:.5f})"
+                                
+                    # Fallback: Fixed % (Legacy)
+                    else:
+                        profit_pct = profit / entry_price
+                        if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
+                            proposed_sl = current_price - (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
+                            if proposed_sl > current_sl:
+                                new_sl = proposed_sl
+                                reason = "Trailing Stop (%)"
+                                
+                    if new_sl:
+                        actions.append({
+                            'type': 'MODIFY', 'ticket': ticket, 
+                            'sl': new_sl, 'tp': current_tp, 'reason': reason
+                        })
 
             elif pos.type == mt5.ORDER_TYPE_SELL:
                 current_price = current_tick.ask
@@ -167,7 +194,9 @@ class RiskManager:
                 # 1. Break-Even
                 if (risk > 0 and profit >= risk * settings.BREAKEVEN_RR and
                     ticket not in self.breakeven_set):
+                    
                     be_sl = entry_price - (risk * 0.1)
+                    
                     if be_sl < current_sl or current_sl == 0:
                         actions.append({
                             'type': 'MODIFY', 'ticket': ticket, 
@@ -178,7 +207,7 @@ class RiskManager:
                 # 2. Partial Close
                 if (current_tp > 0 and ticket not in self.partial_closed):
                     tp_dist = entry_price - current_tp
-                    if profit >= tp_dist * 0.5:
+                    if profit >= tp_dist * 0.6:
                         actions.append({
                             'type': 'PARTIAL', 'ticket': ticket, 
                             'fraction': settings.PARTIAL_CLOSE_FRACTION, 'reason': 'Partial Profit'
@@ -187,13 +216,27 @@ class RiskManager:
 
                 # 3. Trailing Stop
                 if entry_price > 0:
-                    profit_pct = profit / entry_price
-                    if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
-                        new_sl = current_price + (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
-                        if new_sl < current_sl or current_sl == 0:
-                            actions.append({
-                                'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': new_sl, 'tp': current_tp, 'reason': 'Trailing Stop'
-                            })
+                    new_sl = None
+                    reason = ""
+                    
+                    if atr and atr > 0:
+                        if profit >= settings.TRAILING_STOP_ATR_ACTIVATE * atr:
+                            proposed_sl = current_price + (settings.TRAILING_STOP_ATR_STEP * atr)
+                            if proposed_sl < current_sl or current_sl == 0:
+                                new_sl = proposed_sl
+                                reason = f"Trailing Stop (ATR {atr:.5f})"
+                    else:
+                        profit_pct = profit / entry_price
+                        if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
+                            proposed_sl = current_price + (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
+                            if proposed_sl < current_sl or current_sl == 0:
+                                new_sl = proposed_sl
+                                reason = "Trailing Stop (%)"
+
+                    if new_sl:
+                        actions.append({
+                            'type': 'MODIFY', 'ticket': ticket, 
+                            'sl': new_sl, 'tp': current_tp, 'reason': reason
+                        })
 
         return actions
