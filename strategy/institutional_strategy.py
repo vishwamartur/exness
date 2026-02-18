@@ -164,10 +164,12 @@ class InstitutionalStrategy:
             for c in candidates[:5]:
                 try:
                     det = ' '.join(f"{k}:{v}" for k,v in c['details'].items())
-                    safe_det = det.encode('ascii', 'replace').decode('ascii')
-                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {safe_det}")
+                    # Force ASCII for Windows Console
+                    safe_det = det.encode('ascii', 'ignore').decode('ascii') 
+                    safe_sym = c['symbol'].encode('ascii', 'ignore').decode('ascii')
+                    print(f"    {safe_sym:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {safe_det}")
                 except Exception as e:
-                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error: {e}]")
+                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error]")
             
             best = candidates[0]
             
@@ -237,6 +239,15 @@ class InstitutionalStrategy:
         sl_dist = setup['sl_distance']
         tp_dist = setup['tp_distance']
         
+        if sl_dist <= 0: return 
+        
+        # R:R Mandate (Asymmetric Payoff)
+        if getattr(settings, "MANDATE_MIN_RR", False):
+            rr_ratio = tp_dist / sl_dist
+            if rr_ratio < settings.MIN_RISK_REWARD_RATIO:
+                print(f"[RISK] Execution Blocked: R:R {rr_ratio:.2f} < {settings.MIN_RISK_REWARD_RATIO}")
+                return
+
         # Execution Risk Check
         pos = self.client.get_all_positions()
         

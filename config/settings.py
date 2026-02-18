@@ -94,6 +94,19 @@ MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-sprea
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 2000.0))  # Wider for crypto (~$200 spread allowed)
 MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 50.0))  # Commodities (~$0.50 spread on Gold)
 
+# ─── Advanced Risk Controls (P&L Distribution Correction) ────────────────
+# 1. Tail Risk Isolation
+TAIL_RISK_SYMBOLS = ["XAUUSD", "BTCUSD", "ETHUSD", "USOIL"] # High vol symbols
+MAX_TAIL_RISK_LOSS_USD = float(os.getenv("MAX_TAIL_RISK_LOSS_USD", 30.0)) # Hard cap loss per trade for these
+
+# 2. Kill Switch (Auto-Disable Bad Symbols)
+KILL_SWITCH_LOOKBACK_TRADES = int(os.getenv("KILL_SWITCH_LOOKBACK_TRADES", 5))
+KILL_SWITCH_LOSS_THRESHOLD = float(os.getenv("KILL_SWITCH_LOSS_THRESHOLD", -60.0)) # If last 5 trades lost > $60, disable
+
+# 3. Asymmetric Payoff Mandate
+MANDATE_MIN_RR = True # Enforce strictly
+AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0)) # Disable if AvgLoss > 2 * AvgWin
+
 # Trailing Stop (ATR Based)
 TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR
 TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 0.5))         # Trail behind by 0.5 ATR

@@ -3,7 +3,7 @@ Risk Manager Layer
 Centralizes all pre-trade risk checks and position sizing.
 """
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import MetaTrader5 as mt5
 from config import settings
 from utils.news_filter import is_news_blackout, get_active_events
@@ -20,6 +20,8 @@ class RiskManager:
         # Reset if new day (simple check, ideally check date)
         self.daily_trades = cached_count
         self.last_trade_time = {}  # {symbol: timestamp}
+        self.symbol_stats = {} # {symbol: {'net_pnl': 0, 'avg_win': 0, 'avg_loss': 0, 'kill_switch': False}}
+        self.last_stats_update = {} # {symbol: timestamp}
 
     def check_pre_scan(self, symbol):
         """
@@ -34,6 +36,17 @@ class RiskManager:
         # 1. Daily Trade Limit
         if self.daily_trades >= settings.MAX_DAILY_TRADES:
             return False, "Daily Limit Reached"
+            
+        # 1a. Kill Switch & Payoff Mandate
+        # Update stats if stale (e.g. every 5 mins or on every check if fast enough? Let's do 5 mins)
+        if time.time() - self.last_stats_update.get(symbol, 0) > 300:
+             self._update_symbol_stats(symbol)
+             
+        if not self._check_kill_switch(symbol):
+             return False, f"Kill Switch Active (Loss Limit Hit)"
+             
+        if not self._check_payoff_mandate(symbol):
+             return False, f"Payoff Mandate Fail (AvgLoss > {settings.AVG_LOSS_RATIO_THRESHOLD}x AvgWin)"
             
         # 1.5 Daily Loss Limit (Expectancy Guard)
         # We need to calculate realized P&L for today.
@@ -99,6 +112,78 @@ class RiskManager:
             return False, f"News Blackout: {event_name}"
 
         return True, "OK"
+
+    def _update_symbol_stats(self, symbol):
+        """Re-calculates rolling metrics for specific symbol."""
+        try:
+            now = datetime.now(timezone.utc)
+            start = now - timedelta(days=30)  # Lookback 30 days for robustness
+            
+            # Use client helper
+            if not self.client: return
+            deals = self.client.get_history_deals(start, now)
+            if not deals: return
+
+            # Filter for this symbol
+            symbol_deals = [d for d in deals if d.symbol == symbol and d.entry == mt5.DEAL_ENTRY_OUT]
+            
+            if not symbol_deals: return
+            
+            # Sort by time desc
+            symbol_deals.sort(key=lambda x: x.time, reverse=True)
+            
+            # 1. Kill Switch Stats (Last N trades)
+            recent = symbol_deals[:settings.KILL_SWITCH_LOOKBACK_TRADES]
+            recent_pnl = sum(d.profit + d.commission + d.swap for d in recent)
+            
+            # 2. Payoff Stats (All valid trades in window)
+            wins = [d.profit for d in symbol_deals if d.profit > 0]
+            losses = [d.profit for d in symbol_deals if d.profit <= 0]
+            
+            avg_win = sum(wins) / len(wins) if wins else 0
+            avg_loss = abs(sum(losses) / len(losses)) if losses else 0
+            
+            self.symbol_stats[symbol] = {
+                'kill_pnl': recent_pnl,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'win_rate': (len(wins) / len(symbol_deals)) if symbol_deals else 0,
+                'count': len(symbol_deals)
+            }
+            self.last_stats_update[symbol] = time.time()
+            
+        except Exception as e:
+            print(f"[RISK] Stats update failed for {symbol}: {e}")
+
+    def _check_kill_switch(self, symbol):
+        stats = self.symbol_stats.get(symbol)
+        if not stats: return True
+        
+        # Check Net Loss Threshold
+        if stats['kill_pnl'] < settings.KILL_SWITCH_LOSS_THRESHOLD:
+            # Check if we have enough trades to validly trigger
+            if stats['count'] >= 3: 
+                return False
+        return True
+
+    def _check_payoff_mandate(self, symbol):
+        if not settings.MANDATE_MIN_RR: return True
+        
+        stats = self.symbol_stats.get(symbol)
+        if not stats: return True
+        
+        # If we have enough data (e.g. 10 trades)
+        if stats['count'] < 10: return True
+        
+        # If Avg Loss is huge compared to Avg Win
+        if stats['avg_win'] > 0:
+            ratio = stats['avg_loss'] / stats['avg_win']
+            if ratio > settings.AVG_LOSS_RATIO_THRESHOLD:
+                # Allow if Win Rate is stellar? e.g. > 80%? 
+                # For now, strict: NO.
+                return False
+                
+        return True
 
     def check_execution(self, symbol, direction, sl, tp, active_positions=[]):
         """
@@ -184,7 +269,36 @@ class RiskManager:
             
         # Ensure we have client reference to calculate
         if self.client:
-            return self.client.calculate_lot_size(symbol, sl_pips, risk_pct)
+            lot = self.client.calculate_lot_size(symbol, sl_pips, risk_pct)
+            
+            # --- TAIL RISK CLAMP ---
+            # For dangerous symbols, enforce hard dollar cap
+            if symbol in getattr(settings, "TAIL_RISK_SYMBOLS", []):
+                # Calculate Risk amount in USD for this lot
+                # Risk = (Entry - SL) * pip_value * lot
+                # Easier: logic used in calculate_lot_size is Risk = Balance * %
+                # We want Lot such that Lot * RiskPerLot <= MAX_CAP
+                
+                # Reverse engineer:
+                # current_risk_usd = (balance * risk_pct / 100)
+                # If current_risk_usd > CAP, reduce lot.
+                
+                balance = self.client.get_account_balance()
+                planned_risk_usd = balance * risk_pct / 100.0
+                
+                if planned_risk_usd > settings.MAX_TAIL_RISK_LOSS_USD:
+                    # Scaling ratio
+                    scale = settings.MAX_TAIL_RISK_LOSS_USD / planned_risk_usd
+                    lot = lot * scale
+                    
+                    # Re-normalize to steps
+                    symbol_info = mt5.symbol_info(symbol)
+                    if symbol_info:
+                        step = symbol_info.volume_step
+                        lot = round(lot / step) * step
+                        lot = round(lot, 2)
+                        
+            return lot
         return 0.01
 
     def monitor_positions(self, symbol, positions, current_tick, atr=None):
