@@ -1,0 +1,17 @@
+==================================================
+  XGBOOST EVALUATION RESULTS (ALL PAIRS)
+==================================================
+Training Symbols: 17
+Total Samples: 168713
+Accuracy: 0.6878
+              precision    recall  f1-score   support
+
+           0       0.89      0.69      0.77     26279
+           1       0.39      0.69      0.50      7464
+
+    accuracy                           0.69     33743
+   macro avg       0.64      0.69      0.63     33743
+weighted avg       0.78      0.69      0.71     33743
+
+[[18024  8255]
+ [ 2280  5184]]

@@ -69,69 +69,105 @@ def apply_atr_barrier(df, atr_tp_mult=3.0, atr_sl_mult=1.5, time_horizon=20):
     return pd.Series(labels, index=df.index)
 
 
+from execution.mt5_client import MT5Client
+
 def train():
-    print(f"Fetching {settings.HISTORY_BARS} bars for {settings.SYMBOL} (XGBoost Training)...")
-    if not loader.initial_connect():
+    # Initialize connection and detect symbols
+    client = MT5Client()
+    if not client.connect():
         print("Failed to connect to MT5.")
         return
-
-    df = loader.get_historical_data(settings.SYMBOL, "M15", settings.HISTORY_BARS)
-    if df is None or df.empty:
-        print("No data fetched.")
+        
+    if not client.detect_available_symbols():
+        print("No symbols detected.")
         return
+
+    all_data = []
+    total_symbols = len(settings.SYMBOLS)
     
-    # Feature Engineering
-    print("Generating institutional features...")
-    df = features.add_technical_features(df)
+    print(f"\nStarting data collection for {total_symbols} symbols...")
     
-    # Labelling
-    print(f"Labelling data (ATR barriers)...")
-    df['target'] = apply_atr_barrier(
-        df, 
-        atr_tp_mult=settings.ATR_TP_MULTIPLIER,
-        atr_sl_mult=settings.ATR_SL_MULTIPLIER,
-        time_horizon=20
-    )
-    
-    df = df.iloc[:-21].dropna()
+    for i, symbol in enumerate(settings.SYMBOLS, 1):
+        print(f"[{i}/{total_symbols}] Processing {symbol}...", end="\r")
+        
+        # Fetch data
+        df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
+        if df is None or df.empty:
+            continue
+            
+        # Feature Engineering
+        try:
+            df = features.add_technical_features(df)
+            
+            # Labelling
+            df['target'] = apply_atr_barrier(
+                df, 
+                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+                atr_sl_mult=settings.ATR_SL_MULTIPLIER,
+                time_horizon=20
+            )
+            
+            # Drop recent data that can't be labelled yet
+            df = df.iloc[:-21].dropna()
+            
+            # Add symbol column for reference (optional, but good for debugging)
+            # df['symbol'] = symbol 
+            
+            all_data.append(df)
+            
+        except Exception as e:
+            print(f"\nError processing {symbol}: {e}")
+            continue
+
+    if not all_data:
+        print("No valid data collected from any symbol.")
+        return
+
+    # Combine all data
+    full_df = pd.concat(all_data, ignore_index=True)
+    print(f"\n\nTotal Dataset Size: {len(full_df)} bars across {len(all_data)} symbols")
     
     # Class balance
-    positives = df[df['target'] == 1]
-    negatives = df[df['target'] == 0]
-    print(f"Class Balance: Won: {len(positives)} ({len(positives)/len(df)*100:.1f}%), "
-          f"Lost: {len(negatives)} ({len(negatives)/len(df)*100:.1f}%)")
+    positives = full_df[full_df['target'] == 1]
+    negatives = full_df[full_df['target'] == 0]
+    print(f"Class Balance: Won: {len(positives)} ({len(positives)/len(full_df)*100:.1f}%), "
+          f"Lost: {len(negatives)} ({len(negatives)/len(full_df)*100:.1f}%)")
     
     # Features
     drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 
                  'spread', 'real_volume', 'target']
-    feature_cols = [c for c in df.columns if c not in drop_cols]
+    feature_cols = [c for c in full_df.columns if c not in drop_cols]
     
-    X = df[feature_cols]
-    y = df['target']
+    X = full_df[feature_cols]
+    y = full_df['target']
     
     # Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False
+        X, y, test_size=0.2, shuffle=True, random_state=42 
+        # shuffle=True is important here to mix symbols in train/test
     )
     
     # Train XGBoost
-    print("\nTraining XGBoost Classifier...")
-    # Scale_pos_weight for imbalance
+    print("\nTraining XGBoost Classifier on Aggregated Data...")
+    
+    # Re-calculate ratio for the full dataset
     ratio = len(negatives) / len(positives) if len(positives) > 0 else 1.0
     
     xgb_model = xgb.XGBClassifier(
-        n_estimators=300,
-        max_depth=6,             # Shallower than RF to prevent overfit
-        learning_rate=0.05,      # Lower learning rate for robustness
+        n_estimators=500,
+        max_depth=6,             # Increased for larger dataset (more patterns to learn)
+        learning_rate=0.03,
         subsample=0.8,
         colsample_bytree=0.8,
-        scale_pos_weight=ratio,
+        min_child_weight=5,      # Increased to reduce noise in large data
+        gamma=0.2,
+        scale_pos_weight=ratio,  # Removed multiplier - large data provides enough signal
         random_state=42,
         n_jobs=-1,
-        eval_metric='logloss',
-        early_stopping_rounds=20,
-        device='cuda', # Use GPU
-        tree_method='hist' # Auto-selected with device='cuda'
+        eval_metric='aucpr',
+        early_stopping_rounds=50,
+        device='cpu',
+        tree_method='hist' 
     )
     
     # Use evaluation set for early stopping
@@ -140,14 +176,26 @@ def train():
     
     # Evaluate
     preds = xgb_model.predict(X_test)
-    probs = xgb_model.predict_proba(X_test)[:, 1]
     
-    print("\n" + "="*50)
-    print("  XGBOOST EVALUATION RESULTS")
-    print("="*50)
-    print(f"Accuracy: {accuracy_score(y_test, preds):.4f}")
-    print(classification_report(y_test, preds))
-    print(confusion_matrix(y_test, preds))
+    report = classification_report(y_test, preds)
+    cm = confusion_matrix(y_test, preds)
+    acc = accuracy_score(y_test, preds)
+
+    output = []
+    output.append("="*50)
+    output.append("  XGBOOST EVALUATION RESULTS (ALL PAIRS)")
+    output.append("="*50)
+    output.append(f"Training Symbols: {len(all_data)}")
+    output.append(f"Total Samples: {len(full_df)}")
+    output.append(f"Accuracy: {acc:.4f}")
+    output.append(report)
+    output.append(str(cm))
+    
+    output_str = "\n".join(output)
+    print(output_str)
+    
+    with open("xgboost_evaluation.txt", "w") as f:
+        f.write(output_str)
     
     # Save
     model_path = os.path.join(os.path.dirname(settings.MODEL_PATH), "xgboost_v1.pkl")
