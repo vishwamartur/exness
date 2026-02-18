@@ -29,14 +29,25 @@ async def debug_scan():
         
         # 1. Fetch Data
         try:
-            # Check if it returns a coroutine
-            data = strategy._fetch_symbol_data(symbol)
-            if asyncio.iscoroutine(data):
-                data = await data
-                
-            if data is None or (isinstance(data, pd.DataFrame) and data.empty):
-                print(f"  No data fetched for {symbol} (Cooldown/News/Spread?).")
+            from market_data import loader
+            from utils.async_utils import run_in_executor
+            
+            # Fetch data using loader
+            df = await run_in_executor(loader.get_historical_data, symbol, settings.TIMEFRAME, 500)
+            
+            if df is None or df.empty:
+                print(f"  No data fetched for {symbol}.")
                 continue
+                
+            # Prepare data dict for QuantAgent
+            data = {settings.TIMEFRAME: df}
+            
+            # Add H1 if enabled (simulating PairAgent)
+            if settings.H1_TREND_FILTER:
+                 h1 = await run_in_executor(loader.get_historical_data, symbol, "H1", 100)
+                 if h1 is not None:
+                    data['H1'] = h1
+
         except Exception:
             traceback.print_exc()
             continue
@@ -68,9 +79,10 @@ async def debug_scan():
             
             # Validation Logic
             # Check if _get_adaptive_threshold is async
-            threshold = strategy._get_adaptive_threshold()
-            if asyncio.iscoroutine(threshold):
-                threshold = await threshold
+            # Check if _get_adaptive_threshold is async
+            threshold = settings.MIN_CONFLUENCE_SCORE
+            # if asyncio.iscoroutine(threshold):
+            #     threshold = await threshold
 
             is_valid = False
             score = q_res.get('score', 0)
@@ -87,7 +99,7 @@ async def debug_scan():
  
         except Exception:
             print("  Analysis Crashed:")
-            traceback.print_exc()
+            print(traceback.format_exc())
 
     client.shutdown()
 

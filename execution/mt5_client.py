@@ -124,6 +124,13 @@ class MT5Client:
             "leverage": info.leverage,
         }
 
+    def get_history_deals(self, date_from, date_to):
+        """Returns list of deals within the specified time range."""
+        deals = mt5.history_deals_get(date_from, date_to)
+        if deals is None:
+            return []
+        return deals
+
     # ─── Dynamic Position Sizing ─────────────────────────────────────────
 
     def calculate_lot_size(self, symbol, sl_distance_price, risk_percent=None):

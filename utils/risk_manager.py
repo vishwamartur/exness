@@ -3,6 +3,7 @@ Risk Manager Layer
 Centralizes all pre-trade risk checks and position sizing.
 """
 import time
+from datetime import datetime, timezone
 import MetaTrader5 as mt5
 from config import settings
 from utils.news_filter import is_news_blackout, get_active_events
@@ -33,6 +34,31 @@ class RiskManager:
         # 1. Daily Trade Limit
         if self.daily_trades >= settings.MAX_DAILY_TRADES:
             return False, "Daily Limit Reached"
+            
+        # 1.5 Daily Loss Limit (Expectancy Guard)
+        # We need to calculate realized P&L for today.
+        # Ideally this is tracked in SharedState or queried from MT5/Journal.
+        # For speed/robustness, let's query MT5 directly for today's history.
+        try:
+            now = datetime.now(timezone.utc)
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Get history
+            # Note: history_deals_get returns deals, we sum profit, commission, swap
+            deals = self.client.get_history_deals(start_of_day, now)
+            
+            day_pnl = 0.0
+            if deals:
+                for deal in deals:
+                    # Filter output deals (entry/exit) - profit is on exit deals usually, commission on entry/exit
+                    day_pnl += deal.profit + deal.commission + deal.swap
+                    
+            if day_pnl < -settings.MAX_DAILY_LOSS_USD:
+                 return False, f"Daily Loss Limit Hit (${day_pnl:.2f} < -${settings.MAX_DAILY_LOSS_USD})"
+                 
+        except Exception as e:
+            # If fail, don't block, but log?
+            pass
 
         # 2. Cooldown (3 mins per symbol)
         last = self.last_trade_time.get(symbol, 0)

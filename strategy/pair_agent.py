@@ -170,6 +170,15 @@ class PairAgent:
 
         # Construct
         atr = q_res['features'].get('atr', 0)
+        sl_dist = atr * settings.ATR_SL_MULTIPLIER
+        tp_dist = atr * settings.ATR_TP_MULTIPLIER
+        
+        # Enforce Min Risk:Reward
+        if sl_dist > 0:
+            rr_ratio = tp_dist / sl_dist
+            if rr_ratio < settings.MIN_RISK_REWARD_RATIO:
+                return None, f"Low R:R ({rr_ratio:.2f} < {settings.MIN_RISK_REWARD_RATIO})"
+        
         candidate = {
             'symbol': self.symbol,
             'direction': signal,
@@ -178,8 +187,8 @@ class PairAgent:
             'ensemble_score': q_res.get('ensemble_score', 0), # Add ensemble score
             'ml_prob': q_res.get('ml_prob', 0),
             'regime': regime,
-            'sl_distance': atr * settings.ATR_SL_MULTIPLIER,
-            'tp_distance': atr * settings.ATR_TP_MULTIPLIER,
+            'sl_distance': sl_dist,
+            'tp_distance': tp_dist,
             'scaling_factor': 1.0, # Could be dynamic based on regime
             'details': q_res.get('details', {}),
             'attributes': data_dict # For Researcher

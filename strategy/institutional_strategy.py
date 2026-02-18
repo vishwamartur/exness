@@ -164,9 +164,10 @@ class InstitutionalStrategy:
             for c in candidates[:5]:
                 try:
                     det = ' '.join(f"{k}:{v}" for k,v in c['details'].items())
-                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {det}")
+                    safe_det = det.encode('ascii', 'replace').decode('ascii')
+                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {safe_det}")
                 except Exception as e:
-                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error]")
+                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error: {e}]")
             
             best = candidates[0]
             

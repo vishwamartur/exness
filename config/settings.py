@@ -18,16 +18,18 @@ SYMBOL = os.getenv("SYMBOL", "EURUSD")
 # Base names — the bot auto-detects the correct suffix for your account
 # (e.g., EURUSD, EURUSDm, EURUSDc depending on Standard/Cent account)
 
+# Pruned for Expectancy Improvement (Focus on majors/crypto)
+# Temporarily commenting out negative expectancy pairs provided by user analysis
 SYMBOLS_FOREX_MAJORS_BASE = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+    "EURUSD", "GBPUSD", "USDJPY", # "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
 ]
 
 SYMBOLS_FOREX_MINORS_BASE = [
-    "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD", "EURCHF", "EURNZD",
-    "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
-    "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD",
-    "NZDJPY", "NZDCAD", "NZDCHF",
-    "CADJPY", "CADCHF", "CHFJPY",
+    # "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD", "EURCHF", "EURNZD",
+    # "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
+    # "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD",
+    # "NZDJPY", "NZDCAD", "NZDCHF",
+    # "CADJPY", "CADCHF", "CHFJPY",
 ]
 
 SYMBOLS_CRYPTO_BASE = [
@@ -74,7 +76,8 @@ ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Lowered to 5 (Balanced)
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.75))   # Stricter RF threshold (was 0.70)
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.80))   # Stricter RF threshold (was 0.75)
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0)) # Min 1:2 R:R
 
 # Cost Awareness
 COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
@@ -84,7 +87,8 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit mu
 # ─── Trade Management ────────────────────────────────────────────────────
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 5 minutes between trades
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))  # Scale up for A+ setups
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 5))     # Cap daily trade count
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 20))     # Cap daily trade count (Reduced from 100)
+MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0)) # Stop trading if daily loss > $50
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 2000.0))  # Wider for crypto (~$200 spread allowed)
