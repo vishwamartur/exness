@@ -1,3 +1,4 @@
+import asyncio
 import time
 import sys
 import os
@@ -61,6 +62,7 @@ def main():
     trainer = AutoTrainer(strategy, strategy.journal)
     trainer.start()
     
+
     # 5. Start Stream Server (auto-port 8000-8009)
     try:
         stream.start_server(base_port=8000)
@@ -70,14 +72,17 @@ def main():
     print(f"\nScanner ready. {len(settings.SYMBOLS)} instruments | "
           f"Self-learning active | Trade journal active\n")
     
+    # Run async scan loop
+    loop = asyncio.get_event_loop()
+    
     try:
         cycle_num = 0
         while True:
             cycle_num += 1
             cycle_start = time.time()
             
-            # Scan ALL instruments and execute best trade only
-            strategy.scan_all_markets()
+            # Scan all agents concurrently
+            loop.run_until_complete(strategy.run_scan_loop())
             
             elapsed = time.time() - cycle_start
             now = datetime.now().strftime('%H:%M:%S')
@@ -110,4 +115,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Ensure asyncio policy for Windows if needed, though standard loop usually works
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     main()

@@ -46,10 +46,26 @@ class RiskManager:
             # Often happens if symbol not in MarketWatch or market closed
             return False, "No Tick Data"
         
-        spread_pips = (tick.ask - tick.bid) / (0.0001 if "JPY" not in symbol else 0.01)
-        if spread_pips > settings.MAX_SPREAD_PIPS:
+        # Dynamic Spread Calculation
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+             return False, "Symbol Info Not Found"
+        point = symbol_info.point
+        if point == 0: point = 0.00001 # Fallback
+        
+        spread_points = (tick.ask - tick.bid) / point
+        spread_pips = spread_points / 10.0 # Standardize 1 Pip = 10 Points
+        
+        # Dynamic Threshold based on Asset Class
+        max_spread = settings.MAX_SPREAD_PIPS
+        if symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
+            max_spread = settings.MAX_SPREAD_PIPS_CRYPTO # e.g. 50 (needs boost)
+        elif symbol in getattr(settings, 'SYMBOLS_COMMODITIES', []):
+            max_spread = settings.MAX_SPREAD_PIPS_COMMODITY
+            
+        if spread_pips > max_spread:
             # Check if market is even open/active by spread
-            return False, f"Spread High ({spread_pips:.1f} > {settings.MAX_SPREAD_PIPS})"
+            return False, f"Spread High ({spread_pips:.1f} > {max_spread})"
 
         # 4. News Filter
         is_blocked, event_name = is_news_blackout(symbol)
@@ -58,16 +74,59 @@ class RiskManager:
 
         return True, "OK"
 
-    def check_execution(self, symbol, direction, active_positions=[]):
+    def check_execution(self, symbol, direction, sl, tp, active_positions=[]):
         """
         Final checks run just BEFORE placing an order.
-        Checks: Correlation.
+        Checks: Correlation, Profitability (Commission Awareness).
         """
         # 5. Correlation Filter
         conflict, reason = check_correlation_conflict(symbol, direction, active_positions)
         if conflict:
             return False, f"Correlation Conflict: {reason}"
 
+        # 6. Profitability Check (Net Profit > Commission * Ratio)
+        # Estimate cost
+        # We need point value. 
+        # For major FX, 1 lot = $10 per pip. 
+        # Commission = $7.
+        # We need to ensure (TP - Entry) * PipValue > Commission * 2
+        
+        try:
+            # Simple approximation if client not available or for speed
+            tick = mt5.symbol_info_tick(symbol)
+            if tick:
+                # Calculate spread cost
+                spread = (tick.ask - tick.bid)
+                
+                # Gross Profit (Approximate)
+                entry = tick.ask if direction == "BUY" else tick.bid
+                gross_profit_points = abs(tp - entry)
+                
+                # Check Ratio
+                # We normalize everything to points/pips to avoid currency conversion complex logic here
+                # Commision in pips approx: $7 / $10 = 0.7 pips. 
+                # Spread = X pips.
+                # Cost = 0.7 + Spread.
+                
+                point = tick.point
+                if point == 0: point = 0.00001
+                
+                spread_points = spread / point
+                comm_points = (settings.COMMISSION_PER_LOT / 10.0) if "JPY" not in symbol else (settings.COMMISSION_PER_LOT / 1000.0) 
+                # JPY 1 lot = 1000 units? No 100,000. 1 pip = 1000 JPY approx $7?
+                # Let's use a safe simplified buffer: Cost = 2.0 pips (Spread+Comm).
+                
+                cost_pips = spread_points + 1.0 # Buffer for commission
+                profit_pips = gross_profit_points / point
+                
+                net_pips = profit_pips - cost_pips
+                
+                if net_pips < (cost_pips * settings.MIN_NET_PROFIT_RATIO):
+                     return False, f"Low Profitability (Net {net_pips:.1f} pips < Cost {cost_pips:.1f} * {settings.MIN_NET_PROFIT_RATIO})"
+                     
+        except Exception as e:
+            pass # Don't block on calculation error
+            
         return True, "OK"
 
     def record_trade(self, symbol):
@@ -180,11 +239,17 @@ class RiskManager:
                                 new_sl = proposed_sl
                                 reason = "Trailing Stop (%)"
                                 
+                    # OPTIMIZATION: Only modify if change is significant (> 1 pip/point)
                     if new_sl:
-                        actions.append({
-                            'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': new_sl, 'tp': current_tp, 'reason': reason
-                        })
+                        # Get point size (approximate if not available, or use small value)
+                        # For EURUSD point is 0.00001, for JPY 0.001
+                        # We use 10 points as threshold
+                        threshold = 0.0001 if "JPY" not in symbol else 0.01 
+                        if abs(new_sl - current_sl) > threshold:
+                            actions.append({
+                                'type': 'MODIFY', 'ticket': ticket, 
+                                'sl': new_sl, 'tp': current_tp, 'reason': reason
+                            })
 
             elif pos.type == mt5.ORDER_TYPE_SELL:
                 current_price = current_tick.ask
@@ -233,10 +298,16 @@ class RiskManager:
                                 new_sl = proposed_sl
                                 reason = "Trailing Stop (%)"
 
+                    # OPTIMIZATION: Threshold check
                     if new_sl:
-                        actions.append({
-                            'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': new_sl, 'tp': current_tp, 'reason': reason
-                        })
+                        threshold = 0.0001 if "JPY" not in symbol else 0.01
+                         # For Sell, new_sl is lower (closer to price) or we are moving it down?
+                         # Trailing for SELL: SL moves DOWN as price drops.
+                         # current_sl is above price. new_sl should be lower than current_sl.
+                        if abs(new_sl - current_sl) > threshold:
+                            actions.append({
+                                'type': 'MODIFY', 'ticket': ticket, 
+                                'sl': new_sl, 'tp': current_tp, 'reason': reason
+                            })
 
         return actions

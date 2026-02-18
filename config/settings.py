@@ -73,17 +73,22 @@ ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR 
 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
-SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Sureshot mode: only 5+ score fires
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.70))   # Stricter RF threshold (was 0.65)
+SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Lowered to 5 (Balanced)
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.75))   # Stricter RF threshold (was 0.70)
+
+# Cost Awareness
+COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
+MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit must cover Commission x 2
+
 
 # ─── Trade Management ────────────────────────────────────────────────────
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 5 minutes between trades
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))  # Scale up for A+ setups
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 5))     # Cap daily trade count
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 2))  # Max simultaneous positions total
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
-MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 50.0))  # Wider for crypto
-MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 10.0))  # Commodities
+MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 2000.0))  # Wider for crypto (~$200 spread allowed)
+MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 50.0))  # Commodities (~$0.50 spread on Gold)
 
 # Trailing Stop (ATR Based)
 TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR

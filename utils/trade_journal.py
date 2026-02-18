@@ -245,6 +245,24 @@ class TradeJournal:
 
         return analysis
 
+    def get_recent_trades(self, symbol, limit=10):
+        """Returns the last N trades for a specific symbol."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT outcome, profit, entry_time
+            FROM trades
+            WHERE symbol = ? AND outcome IN ('WIN', 'LOSS')
+            ORDER BY entry_time DESC
+            LIMIT ?
+        """, (symbol, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [{'outcome': r[0], 'profit': r[1], 'time': r[2]} for r in rows]
+
     def print_summary(self):
         """Prints a compact performance summary."""
         stats = self.get_daily_stats()
