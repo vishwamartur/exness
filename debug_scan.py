@@ -94,6 +94,51 @@ async def debug_scan():
             elif score >= 2 and (ml_prob > 0.85 or ml_prob < 0.15):
                 is_valid = True
                 print(f"  -> VALID (ML Boost)")
+            if is_valid:
+                # 4. Risk Check (Simulated)
+                print(f"  [RISK] Checking execution constraints...")
+                # We need a dummy position list for debug
+                dummy_positions = [] 
+                
+                # Check Execution (Symbol, Direction, SL, TP) - SL/TP need calculation or dummy
+                # Quick approx for debug
+                atr = q_res['features'].get('atr', 0.001)
+                sl_dist = atr * settings.ATR_SL_MULTIPLIER
+                tp_dist = atr * settings.ATR_TP_MULTIPLIER
+                
+                # Close price
+                close = q_res['features'].get('close')
+                if q_res['direction'] == 'BUY':
+                    sl = close - sl_dist
+                    tp = close + tp_dist
+                else:
+                    sl = close + sl_dist
+                    tp = close - tp_dist
+                    
+                allowed, reason = strategy.risk_manager.check_execution(symbol, q_res['direction'], sl, tp, dummy_positions)
+                if allowed:
+                    print(f"  [RISK] -> PASSED")
+                    
+                    # 5. Researcher Debate
+                    print(f"  [RESEARCHER] Initiating Bull/Bear Debate...")
+                    # Prepare mock attributes (usually passed from PairAgent)
+                    attributes = {settings.TIMEFRAME: q_res.get('data')} 
+                    analyst_mock = {'regime': a_res.get('regime')}
+                    
+                    research = await strategy.researcher.conduct_research(symbol, q_res, analyst_mock)
+                    
+                    print(f"    Action: {research['action']}")
+                    print(f"    Conf:   {research['confidence']}%")
+                    print(f"    Reason: {research['reason']}")
+                    
+                    if research['action'] == q_res['direction']:
+                         print(f"  => TRADE APPROVED by Swarm")
+                    else:
+                         print(f"  => TRADE BLOCKED by Researcher")
+
+                else:
+                    print(f"  [RISK] -> BLOCKED: {reason}")
+
             else:
                 print(f"  -> REJECTED")
  

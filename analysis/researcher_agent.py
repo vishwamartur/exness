@@ -77,33 +77,43 @@ class ResearcherAgent:
         if not text: return default
         
         try:
-            # Mistral might be chatty, try to find the last line or the pipe format
+            import re
+            
+            # Regex to find ACTION | CONFIDENCE | REASON
+            # Looks for BUY/SELL/HOLD, followed by pipe, number (with optional %), pipe, reason
+            # Case insensitive, handles whitespace
+            pattern = r"(BUY|SELL|HOLD)\s*\|\s*(\d+)\%?\s*\|\s*(.*)"
+            
+            # Search from the end of the string first (likely conclusion)
+            matches = list(re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE))
+            
+            if matches:
+                # Use the last match found
+                last_match = matches[-1]
+                action = last_match.group(1).upper()
+                conf = int(last_match.group(2))
+                reason = last_match.group(3).strip()
+                
+                return {
+                    'action': action,
+                    'confidence': conf,
+                    'reason': reason
+                }
+            
+            # Fallback: strict split if regex fails (legacy support)
             lines = text.strip().split('\n')
-            final_line = lines[-1]
-            
-            # Look for the pipe
-            if '|' in final_line:
-                parts = final_line.split('|')
-            else:
-                # Maybe it's in the text somewhere?
-                # Fallback: Just look for ACTION | CONFIDENCE
-                found = False
-                for line in reversed(lines):
-                    if '|' in line and len(line.split('|')) == 3:
-                        parts = line.split('|')
-                        found = True
-                        break
-                if not found: return default
+            for line in reversed(lines):
+                if '|' in line and len(line.split('|')) >= 3:
+                     parts = line.split('|')
+                     action = parts[0].strip().upper()
+                     if action in ['BUY', 'SELL', 'HOLD']:
+                         return {
+                             'action': action,
+                             'confidence': int(''.join(filter(str.isdigit, parts[1]))),
+                             'reason': parts[2].strip()
+                         }
 
-            action = parts[0].strip().upper()
-            conf = int(parts[1].strip().replace('%',''))
-            reason = parts[2].strip()
-            
-            return {
-                'action': action,
-                'confidence': conf,
-                'reason': reason
-            }
+            return default
             
         except Exception as e:
             print(f"[RESEARCHER] Parse Error: {e}")
