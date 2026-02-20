@@ -76,7 +76,7 @@ ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Lowered to 5 (Balanced)
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.80))   # Stricter RF threshold (was 0.75)
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.65))   # Stricter RF threshold (was 0.75, lowered to 0.65)
 MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0)) # Min 1:2 R:R
 
 # Cost Awareness
@@ -138,6 +138,11 @@ TRAIN_TEST_SPLIT = 0.8
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "scalper_v1.pkl")
 XGB_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "xgboost_v1.pkl")
 USE_XGBOOST = True
+
+# BOS Strategy Settings
+BOS_ENABLE = True
+BOS_MOMENTUM_MULTIPLIER = 1.5
+BOS_SWEEP_LOOKBACK = 20
 
 # Lag-Llama Settings
 USE_LAG_LLAMA = False # os.getenv("USE_LAG_LLAMA", "True").lower() == "true"

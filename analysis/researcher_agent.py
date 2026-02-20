@@ -30,6 +30,16 @@ class ResearcherAgent:
         regime = analyst_data.get('regime', 'NORMAL')
         h4_trend = quant_data.get('h4_trend', 0)
         
+        # 0. Check Requisites
+        if not self.advisor.api_key:
+            # Fallback for users without LLM
+            print("[RESEARCHER] No API Key. Falling back to Technical Confidence.")
+            return {
+                'action': direction,
+                'confidence': 85 if score >= 4 else 75,
+                'reason': f"Technical Strategy (Score {score})"
+            }
+
         # 2. Construct Debate Prompt
         system_prompt = """
         You are a Senior Implementation Researcher at a top Hedge Fund.

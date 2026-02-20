@@ -15,13 +15,37 @@ class RiskManager:
         self.client = mt5_client
         self.state = SharedState()
         
-        # Restore Daily Trades from Shared State
+        # Restore Daily Trades with Date Check
         cached_count = self.state.get("daily_trades", 0)
-        # Reset if new day (simple check, ideally check date)
-        self.daily_trades = cached_count
+        last_date_str = self.state.get("daily_trades_date", "")
+        
+        current_date = datetime.now(timezone.utc).date()
+        current_date_str = current_date.isoformat()
+        
+        if last_date_str != current_date_str:
+            # New day (or first run), reset
+            self.daily_trades = 0
+            self.state.set("daily_trades", 0)
+            self.state.set("daily_trades_date", current_date_str)
+            print(f"[RISK] Daily trades reset to 0 (New Day: {current_date_str})")
+        else:
+            self.daily_trades = cached_count
+            print(f"[RISK] Restored daily trades: {self.daily_trades}")
+            
+        self.current_trade_date = current_date
         self.last_trade_time = {}  # {symbol: timestamp}
         self.symbol_stats = {} # {symbol: {'net_pnl': 0, 'avg_win': 0, 'avg_loss': 0, 'kill_switch': False}}
         self.last_stats_update = {} # {symbol: timestamp}
+        
+    def _check_daily_reset(self):
+        """Checks if a new day has started in UTC and resets daily limits."""
+        now_date = datetime.now(timezone.utc).date()
+        if now_date != self.current_trade_date:
+            print(f"[RISK] New Day Detected: {now_date} (Was: {self.current_trade_date}) - Resetting Limits")
+            self.daily_trades = 0
+            self.current_trade_date = now_date
+            self.state.set("daily_trades", 0)
+            self.state.set("daily_trades_date", now_date.isoformat())
 
     def check_pre_scan(self, symbol):
         """
@@ -34,6 +58,7 @@ class RiskManager:
             return False, "Circuit Breaker TRIPPED via Shared Memory"
 
         # 1. Daily Trade Limit
+        self._check_daily_reset()
         if self.daily_trades >= settings.MAX_DAILY_TRADES:
             return False, "Daily Limit Reached"
             

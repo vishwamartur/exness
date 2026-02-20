@@ -1,0 +1,48 @@
+--- Rejection Summary ---
+Total Candles Scanned: 900
+Total Signals: 1
+
+No Liquidity Sweep: 19
+Weak Close (Wick Heavy): 4
+Weak Expansion (Range 0.00061 < 1.5x ATR): 3
+Weak Expansion (Range 0.00068 < 1.5x ATR): 3
+Weak Expansion (Range 0.00054 < 1.5x ATR): 3
+Weak Expansion (Range 0.00071 < 1.5x ATR): 2
+Weak Expansion (Range 0.00045 < 1.5x ATR): 2
+Weak Expansion (Range 0.00043 < 1.5x ATR): 2
+Weak Expansion (Range 0.00050 < 1.5x ATR): 2
+Weak Expansion (Range 0.00070 < 1.5x ATR): 2
+Weak Expansion (Range 0.00047 < 1.5x ATR): 2
+Weak Expansion (Range 0.00033 < 1.5x ATR): 1
+Weak Expansion (Range 0.00089 < 1.5x ATR): 1
+Weak Expansion (Range 0.00056 < 1.5x ATR): 1
+Weak Expansion (Range 0.00126 < 1.5x ATR): 1
+Low Volatility (Contraction): 1
+Weak Expansion (Range 0.00082 < 1.5x ATR): 1
+Weak Expansion (Range 0.00078 < 1.5x ATR): 1
+Weak Expansion (Range 0.00063 < 1.5x ATR): 1
+Weak Expansion (Range 0.00062 < 1.5x ATR): 1
+Weak Expansion (Range 0.00074 < 1.5x ATR): 1
+Weak Expansion (Range 0.00098 < 1.5x ATR): 1
+Weak Expansion (Range 0.00060 < 1.5x ATR): 1
+Weak Expansion (Range 0.00049 < 1.5x ATR): 1
+Weak Expansion (Range 0.00052 < 1.5x ATR): 1
+Weak Expansion (Range 0.00046 < 1.5x ATR): 1
+Weak Expansion (Range 0.00042 < 1.5x ATR): 1
+Weak Expansion (Range 0.00027 < 1.5x ATR): 1
+Weak Expansion (Range 0.00059 < 1.5x ATR): 1
+Weak Expansion (Range 0.00039 < 1.5x ATR): 1
+Weak Expansion (Range 0.00055 < 1.5x ATR): 1
+Weak Expansion (Range 0.00034 < 1.5x ATR): 1
+Weak Expansion (Range 0.00041 < 1.5x ATR): 1
+Weak Expansion (Range 0.00016 < 1.5x ATR): 1
+Weak Expansion (Range 0.00075 < 1.5x ATR): 1
+Weak Expansion (Range 0.00081 < 1.5x ATR): 1
+Weak Expansion (Range 0.00093 < 1.5x ATR): 1
+Weak Expansion (Range 0.00102 < 1.5x ATR): 1
+Weak Expansion (Range 0.00044 < 1.5x ATR): 1
+Weak Expansion (Range 0.00040 < 1.5x ATR): 1
+Weak Expansion (Range 0.00057 < 1.5x ATR): 1
+Weak Expansion (Range 0.00051 < 1.5x ATR): 1
+Weak Expansion (Range 0.00028 < 1.5x ATR): 1
+Weak Expansion (Range 0.00024 < 1.5x ATR): 1

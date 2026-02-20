@@ -8,6 +8,7 @@ from config import settings
 from utils.async_utils import run_in_executor
 from market_data import loader
 from utils.trade_journal import TradeJournal
+from strategy.bos_strategy import BOSStrategy
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -40,6 +41,9 @@ class PairAgent:
         
         # Performance Thresholds (Self-Correction)
         self.max_consecutive_losses = 3
+
+        # BOS Strategy
+        self.bos = BOSStrategy()
 
         # Load capabilities
         self.timeframe = settings.TIMEFRAME
@@ -144,7 +148,12 @@ class PairAgent:
         regime = analysis['regime']
         self.regime = regime # Update state for active trade management
         
-        # 3. Construct Candidate
+        # 3. BOS Analysis (Priority)
+        bos_res = {}
+        if getattr(settings, 'BOS_ENABLE', False):
+             bos_res = self.bos.analyze(df_scan)
+        
+        # 4. Construct Candidate using ML or BOS
         # Filter: Minimum Score
         score = q_res.get('score', 0)
         
@@ -152,13 +161,22 @@ class PairAgent:
         if score < settings.MIN_CONFLUENCE_SCORE:
             return None, f"Low Score ({score})"
             
-        # Sureshot Mode Filter
-        if score < settings.SURESHOT_MIN_SCORE:
-            return None, f"Below Sureshot ({score} < {settings.SURESHOT_MIN_SCORE})"
+        # Sureshot Mode Filter (Only boost, don't block if > MIN)
+        # if score < settings.SURESHOT_MIN_SCORE:
+        #    return None, f"Below Sureshot ({score} < {settings.SURESHOT_MIN_SCORE})"
             
-        # ML Prob Filter
-        if q_res.get('ml_prob', 0) < settings.RF_PROB_THRESHOLD:
-             return None, f"Low ML Prob ({q_res.get('ml_prob', 0):.2f})"
+        # ML Prob Filter (Directional)
+        prob = q_res.get('ml_prob', 0.5)
+        # Fix: Use q_res['direction'] as candidate is not defined yet
+        if q_res.get('direction') == 'SELL':
+            prob = 1.0 - prob
+            
+        # Only enforce ML threshold if Score is not Sureshot
+        if score < 5:
+            if prob < settings.RF_PROB_THRESHOLD:
+                 return None, f"Low ML Prob ({prob:.2f} < {settings.RF_PROB_THRESHOLD})"
+                 
+        # Note: candidate['ml_prob'] assignment removed here, will be set during creation below
              
         # Regime Filter (Basic)
         signal = q_res['signal']
@@ -185,7 +203,7 @@ class PairAgent:
             'score': score,
             'entry_price': 0, # Filled at execution
             'ensemble_score': q_res.get('ensemble_score', 0), # Add ensemble score
-            'ml_prob': q_res.get('ml_prob', 0),
+            'ml_prob': prob, # Use corrected directional probability
             'regime': regime,
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
@@ -197,7 +215,43 @@ class PairAgent:
         # Boost for A+ Setups
         if score >= 8:
             candidate['scaling_factor'] = settings.RISK_FACTOR_MAX
+
+        # BOS Override / Fusion
+        if bos_res.get('valid'):
+            # If BOS is valid, we can either:
+            # A) Override everything and take the trade
+            # B) Use it to boost the score
             
+            # Policy: BOS is a strong technical signal.
+            # If ML agrees directionally, it's a Sureshot (Score 10).
+            # If ML is weak/neutral, we still take valid BOS but maybe lower sizing?
+            # User said "Combination beats retail".
+            
+            if bos_res['signal'] == candidate['direction']:
+                 candidate['score'] = 10
+                 candidate['ml_prob'] = max(candidate['ml_prob'], 0.85) # Boost confidence
+                 candidate['details']['BOS'] = bos_res['reason']
+                 candidate['scaling_factor'] = settings.RISK_FACTOR_MAX
+                 return candidate, f"BOS+ML CANDIDATE ({candidate['direction']})"
+            
+            elif score < 5: # ML didn't find much, but BOS did
+                 # Create a BOS-only candidate
+                 bos_candidate = {
+                    'symbol': self.symbol,
+                    'direction': bos_res['signal'],
+                    'score': bos_res['score'], # 10 from BOS strategy
+                    'entry_price': bos_res['price'],
+                    'ensemble_score': 0,
+                    'ml_prob': 0.6, # Default 'technical' prob
+                    'regime': regime,
+                    'sl_distance': abs(bos_res['price'] - bos_res['sl']), # Specific SL
+                    'tp_distance': abs(bos_res['price'] - bos_res['sl']) * 2, # 1:2 default
+                    'scaling_factor': 1.0,
+                    'details': {'BOS': bos_res['reason']},
+                    'attributes': data_dict
+                 }
+                 return bos_candidate, f"BOS CANDIDATE ({bos_candidate['direction']})"
+
         return candidate, "OK"
 
     async def manage_active_trades(self):

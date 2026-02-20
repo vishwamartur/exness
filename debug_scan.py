@@ -12,6 +12,14 @@ settings.LOG_LEVEL = "DEBUG"
 import asyncio
 
 async def debug_scan():
+    from utils.shared_state import SharedState
+    ss = SharedState()
+    print("\n=== SHARED STATE DEBUG ===")
+    print(f"Daily Trades: {ss.get('daily_trades')}")
+    print(f"Daily Date:   {ss.get('daily_trades_date')}")
+    print(f"Full State:   {ss.get_all()}")
+    print("==========================\n")
+
     print("Initializing MT5...")
     client = MT5Client()
     if not client.connect():
