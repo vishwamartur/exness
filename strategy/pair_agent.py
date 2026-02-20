@@ -245,11 +245,16 @@ class PairAgent:
                     'ml_prob': 0.6, # Default 'technical' prob
                     'regime': regime,
                     'sl_distance': abs(bos_res['price'] - bos_res['sl']), # Specific SL
-                    'tp_distance': abs(bos_res['price'] - bos_res['sl']) * 2, # 1:2 default
+                    'tp_distance': abs(bos_res['price'] - bos_res['sl']) * settings.BOS_MIN_RISK_REWARD, # Retail R:R
                     'scaling_factor': 1.0,
                     'details': {'BOS': bos_res['reason']},
                     'attributes': data_dict
                  }
+                 
+                 # Retail Viability Check
+                 if not self._check_retail_viability(bos_candidate):
+                     return None, "Retail Costs High"
+                     
                  return bos_candidate, f"BOS CANDIDATE ({bos_candidate['direction']})"
 
         return candidate, "OK"
@@ -357,6 +362,36 @@ class PairAgent:
         self.is_active = True
         self.consecutive_losses = 0
         print(f"[{self.symbol}] 🟢 Circuit breaker reset.")
+
+    def _check_retail_viability(self, candidate):
+        """
+        Enforce Retail Profitability Filters:
+        1. Spread / SL Ratio check
+        2. Hunting Hours check
+        """
+        # 1. Spread Check
+        tick = mt5.symbol_info_tick(self.symbol)
+        if tick:
+            spread_pips = (tick.ask - tick.bid)
+            # Assuming SL distance is in price units
+            sl_dist = candidate['sl_distance']
+            
+            if sl_dist > 0:
+                ratio = spread_pips / sl_dist
+                max_ratio = getattr(settings, 'BOS_MAX_SPREAD_RATIO', 0.15)
+                if ratio > max_ratio:
+                    print(f"[{self.symbol}] 🛑 Retail Filter: Spread {spread_pips:.5f} is {ratio:.1%} of SL. Max {max_ratio:.1%}")
+                    return False
+        
+        # 2. Hunting Hours Check
+        hunting_hours = getattr(settings, 'BOS_HUNTING_HOURS', [])
+        current_hour = datetime.now(timezone.utc).hour
+        
+        if hunting_hours and current_hour not in hunting_hours:
+             print(f"[{self.symbol}] 🛑 Retail Filter: Off-hours ({current_hour}:00). Hunting: {hunting_hours}")
+             return False
+             
+        return True
 
 def projected_time_now():
     return datetime.now(timezone.utc).timestamp()

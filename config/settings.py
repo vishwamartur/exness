@@ -143,6 +143,9 @@ USE_XGBOOST = True
 BOS_ENABLE = True
 BOS_MOMENTUM_MULTIPLIER = 1.5
 BOS_SWEEP_LOOKBACK = 20
+BOS_MAX_SPREAD_RATIO = 0.15      # Spread max 15% of SL capability
+BOS_HUNTING_HOURS = [8, 9, 10, 13, 14, 15] # Strict London/NY Open hours
+BOS_MIN_RISK_REWARD = 2.5       # Asymmetric Payoff for Retail
 
 # Lag-Llama Settings
 USE_LAG_LLAMA = False # os.getenv("USE_LAG_LLAMA", "True").lower() == "true"
