@@ -8,7 +8,9 @@ from config import settings
 from utils.async_utils import run_in_executor
 from market_data import loader
 from utils.trade_journal import TradeJournal
+from utils.trade_journal import TradeJournal
 from strategy.bos_strategy import BOSStrategy
+from utils.news_filter import is_news_blackout
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -73,6 +75,12 @@ class PairAgent:
         """
         if not self.is_active:
             return None, "Inactive (Circuit Breaker)"
+
+        # 0. News Filter
+        if getattr(settings, 'NEWS_FILTER_ENABLE', False):
+            is_blackout, event_name = is_news_blackout(self.symbol)
+            if is_blackout:
+                return None, f"News Blackout ({event_name})"
 
         # 1. Pre-Scan Risk Check
         # Check cooldown
