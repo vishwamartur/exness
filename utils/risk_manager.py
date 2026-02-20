@@ -187,7 +187,7 @@ class RiskManager:
         # Check Net Loss Threshold
         if stats['kill_pnl'] < settings.KILL_SWITCH_LOSS_THRESHOLD:
             # Check if we have enough trades to validly trigger
-            if stats['count'] >= 3: 
+            if stats['count'] >= 10: 
                 return False
         return True
 
@@ -197,8 +197,8 @@ class RiskManager:
         stats = self.symbol_stats.get(symbol)
         if not stats: return True
         
-        # If we have enough data (e.g. 10 trades)
-        if stats['count'] < 10: return True
+        # If we have enough data (e.g. 20 trades)
+        if stats['count'] < 20: return True
         
         # If Avg Loss is huge compared to Avg Win
         if stats['avg_win'] > 0:

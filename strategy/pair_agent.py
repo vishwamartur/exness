@@ -187,7 +187,7 @@ class PairAgent:
         # Note: candidate['ml_prob'] assignment removed here, will be set during creation below
              
         # Regime Filter (Basic)
-        signal = q_res['signal']
+        signal = q_res.get('signal', 'NEUTRAL')
         if signal == "BUY" and "BEARISH" in regime:
              # Allow if score is high (Counter-trend)?
              if score < 7: return None, f"Regime Conflict ({regime})"
@@ -216,7 +216,9 @@ class PairAgent:
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
             'scaling_factor': 1.0, # Could be dynamic based on regime
+            'scaling_factor': 1.0, # Could be dynamic based on regime
             'details': q_res.get('details', {}),
+            'features': q_res.get('features', {}), # For Researcher
             'attributes': data_dict # For Researcher
         }
         

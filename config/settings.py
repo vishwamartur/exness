@@ -74,10 +74,10 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))  # SL = 1.5x ATR
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR (Higher Reward)
 
 # Confluence Gating
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 3))  # Minimum 3 confluences to enter
-SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 5))     # Lowered to 5 (Balanced)
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.65))   # Stricter RF threshold (was 0.75, lowered to 0.65)
-MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0)) # Min 1:2 R:R
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # AGGRESSIVE: 2 confluences (Was 3)
+SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 3))     # AGGRESSIVE: Sureshot at 3 (Was 5)
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.50))   # AGGRESSIVE: 50% Confidence (Was 0.65)
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.5)) # Relaxed 1:1.5 R:R
 
 # Cost Awareness
 COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
@@ -91,8 +91,8 @@ MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 20))     # Cap daily trade 
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0)) # Stop trading if daily loss > $50
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
-MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 2000.0))  # Wider for crypto (~$200 spread allowed)
-MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 50.0))  # Commodities (~$0.50 spread on Gold)
+MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
+MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 150.0))  # Commodities (~$0.50 spread on Gold)
 
 # ─── Advanced Risk Controls (P&L Distribution Correction) ────────────────
 # 1. Tail Risk Isolation
@@ -100,12 +100,12 @@ TAIL_RISK_SYMBOLS = ["XAUUSD", "BTCUSD", "ETHUSD", "USOIL"] # High vol symbols
 MAX_TAIL_RISK_LOSS_USD = float(os.getenv("MAX_TAIL_RISK_LOSS_USD", 30.0)) # Hard cap loss per trade for these
 
 # 2. Kill Switch (Auto-Disable Bad Symbols)
-KILL_SWITCH_LOOKBACK_TRADES = int(os.getenv("KILL_SWITCH_LOOKBACK_TRADES", 5))
-KILL_SWITCH_LOSS_THRESHOLD = float(os.getenv("KILL_SWITCH_LOSS_THRESHOLD", -60.0)) # If last 5 trades lost > $60, disable
+KILL_SWITCH_LOOKBACK_TRADES = int(os.getenv("KILL_SWITCH_LOOKBACK_TRADES", 15)) # Relaxed from 5
+KILL_SWITCH_LOSS_THRESHOLD = float(os.getenv("KILL_SWITCH_LOSS_THRESHOLD", -60.0)) # If last 15 trades lost > $60, disable
 
 # 3. Asymmetric Payoff Mandate
 MANDATE_MIN_RR = True # Enforce strictly
-AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0)) # Disable if AvgLoss > 2 * AvgWin
+AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 1.0)) # AvgLoss can be equal to AvgWin (Relaxed from 0.6)
 
 # Trailing Stop (ATR Based)
 TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR

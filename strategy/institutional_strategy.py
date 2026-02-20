@@ -53,6 +53,7 @@ class InstitutionalStrategy:
     def __init__(self, mt5_client, on_event=None):
         self.client = mt5_client
         self.on_event = on_event
+        self.timeframe = settings.TIMEFRAME
         
         # --- SHARED RESOURCES --------------------------------------------
         self.risk_manager = RiskManager(mt5_client)
@@ -144,7 +145,27 @@ class InstitutionalStrategy:
             
             if candidate:
                 # Execution Check (Global Limit)
-                allowed, exec_reason = self.risk_manager.check_execution(candidate['symbol'], candidate['direction'], all_positions)
+                # Need approximate SL/TP levels for Profitability Check
+                # Use last close as approximate entry
+                approx_entry = candidate['attributes'][self.timeframe]['close'].iloc[-1]
+                
+                sl_price = 0.0
+                tp_price = 0.0
+                
+                if candidate['direction'] == 'BUY':
+                    sl_price = approx_entry - candidate['sl_distance']
+                    tp_price = approx_entry + candidate['tp_distance']
+                else:
+                    sl_price = approx_entry + candidate['sl_distance']
+                    tp_price = approx_entry - candidate['tp_distance']
+
+                allowed, exec_reason = self.risk_manager.check_execution(
+                    candidate['symbol'], 
+                    candidate['direction'], 
+                    sl_price, 
+                    tp_price, 
+                    all_positions
+                )
                 if allowed: 
                     candidates.append(candidate)
                 else: 
@@ -188,7 +209,8 @@ class InstitutionalStrategy:
             
             try:
                 # Async Call to Researcher
-                research = await self.researcher.conduct_research(best['symbol'], attributes, analyst_mock)
+                # Pass 'best' (candidate dict) as quant_data, which has 'features', 'score', etc.
+                research = await self.researcher.conduct_research(best['symbol'], best, analyst_mock)
                 
                 print(f"--> Debate Result: {research['action']} (Conf: {research['confidence']}%)")
                 print(f"--> Reason: {research['reason']}")
@@ -204,14 +226,18 @@ class InstitutionalStrategy:
                     })
                 
                 # Decision Logic
-                # 1. Strong Researcher Agreement
+                # 1. Strong Researcher Agreement (Relaxed to 50%)
                 execute = False
-                if research['action'] == best['direction'] and research['confidence'] >= 70:
+                if research['action'] == best['direction'] and research['confidence'] >= 50:
                     execute = True
-                # 2. Strong Technical Override (with Researcher not blocking hard)
-                elif best['score'] >= 5 and research['action'] != 'HOLD': 
+                # 2. Technical Override (Sureshot from Settings)
+                elif best['score'] >= settings.SURESHOT_MIN_SCORE: 
                      execute = True
-                     print("--> Executing on High Technical Score (Override).")
+                     print(f"--> Executing on Turnkey Score (>{settings.SURESHOT_MIN_SCORE}).")
+                # 3. Aggressive Mode: Allow HOLD if score meets min confluence
+                elif best['score'] >= settings.MIN_CONFLUENCE_SCORE and research['action'] == 'HOLD':
+                     execute = True
+                     print("--> Executing on Min Score (Aggressive Mode).")
                 
                 if execute:
                     print(f"  >>> EXECUTE: {best['symbol']} {best['direction']}")

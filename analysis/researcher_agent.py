@@ -82,6 +82,7 @@ class ResearcherAgent:
         return self._parse_response(response, direction)
 
     def _parse_response(self, text, proposed_direction):
+        print(f"[RESEARCHER] Raw Response: {text!r}")
         default = {'action': 'HOLD', 'confidence': 0, 'reason': 'Error parsing'}
         
         if not text: return default
@@ -90,9 +91,9 @@ class ResearcherAgent:
             import re
             
             # Regex to find ACTION | CONFIDENCE | REASON
-            # Looks for BUY/SELL/HOLD, followed by pipe, number (with optional %), pipe, reason
-            # Case insensitive, handles whitespace
-            pattern = r"(BUY|SELL|HOLD)\s*\|\s*(\d+)\%?\s*\|\s*(.*)"
+            # Looks for BUY/SELL/HOLD/NEUTRAL, followed by pipe, number (with optional %), pipe, reason
+            # Handles **BUY** markdown and potentially **Reason**
+            pattern = r"(?:[*]*)(BUY|SELL|HOLD|NEUTRAL)(?:[*]*)\s*\|\s*(\d+)\%?\s*\|\s*(?:[*]*)(.*)"
             
             # Search from the end of the string first (likely conclusion)
             matches = list(re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE))
@@ -101,8 +102,10 @@ class ResearcherAgent:
                 # Use the last match found
                 last_match = matches[-1]
                 action = last_match.group(1).upper()
+                if action == 'NEUTRAL': action = 'HOLD' # Map NEUTRAL to HOLD
+                
                 conf = int(last_match.group(2))
-                reason = last_match.group(3).strip()
+                reason = last_match.group(3).strip().rstrip('*') # Remove trailing markdown
                 
                 return {
                     'action': action,

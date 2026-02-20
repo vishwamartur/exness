@@ -1,160 +1,76 @@
 
 import sys
 import os
-import pandas as pd
+import asyncio
 import traceback
+from datetime import datetime, timezone
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from config import settings
 from execution.mt5_client import MT5Client
 from strategy.institutional_strategy import InstitutionalStrategy
 
+# Enable Debug Mode for verbose output
+settings.DEBUG_MODE = True
 settings.LOG_LEVEL = "DEBUG"
 
-import asyncio
-
-async def debug_scan():
-    from utils.shared_state import SharedState
-    ss = SharedState()
-    print("\n=== SHARED STATE DEBUG ===")
-    print(f"Daily Trades: {ss.get('daily_trades')}")
-    print(f"Daily Date:   {ss.get('daily_trades_date')}")
-    print(f"Full State:   {ss.get_all()}")
-    print("==========================\n")
-
-    print("Initializing MT5...")
+async def debug_scan_session():
+    print(f"\n{'='*60}\n  DEBUG SCAN SESSION\n{'='*60}")
+    
+    # 1. Connect MT5
     client = MT5Client()
     if not client.connect():
-        print("MT5 Connect Failed")
+        print("[ERROR] MT5 Connection Failed")
         return
 
-    print("Initializing Strategy...")
-    strategy = InstitutionalStrategy(client)
-    
-    symbols = ["EURUSD", "GBPUSD", "XAUUSD"]
-    print(f"\nDebugging {symbols}...\n")
-
-    for symbol in symbols:
-        print(f"--- ANALYZING {symbol} ---")
+    try:
+        # Override Symbols BEFORE Strategy Init
+        # Use ALL_BASE_SYMBOLS to test everything
+        target_symbols = settings.ALL_BASE_SYMBOLS
+        settings.SYMBOLS = target_symbols
         
-        # 1. Fetch Data
-        try:
-            from market_data import loader
-            from utils.async_utils import run_in_executor
-            
-            # Fetch data using loader
-            df = await run_in_executor(loader.get_historical_data, symbol, settings.TIMEFRAME, 500)
-            
-            if df is None or df.empty:
-                print(f"  No data fetched for {symbol}.")
-                continue
-                
-            # Prepare data dict for QuantAgent
-            data = {settings.TIMEFRAME: df}
-            
-            # Add H1 if enabled (simulating PairAgent)
-            if settings.H1_TREND_FILTER:
-                 h1 = await run_in_executor(loader.get_historical_data, symbol, "H1", 100)
-                 if h1 is not None:
-                    data['H1'] = h1
+        # Populate Category Lists manually for test (since auto-detect didn't run)
+        settings.SYMBOLS_CRYPTO = settings.SYMBOLS_CRYPTO_BASE
+        settings.SYMBOLS_COMMODITIES = settings.SYMBOLS_COMMODITIES_BASE
+        
+        print(f"[INIT] Settings Symbols set to: {len(settings.SYMBOLS)} pairs")
+        print(f"[INIT] Categories: {len(settings.SYMBOLS_CRYPTO)} Crypto, {len(settings.SYMBOLS_COMMODITIES)} Commodities")
 
-        except Exception:
-            traceback.print_exc()
-            continue
-            
-        # 2. Quant Analysis
-        try:
-            # Check if analyze is async (it likely is or will be)
-            q_res = strategy.quant.analyze(symbol, data)
-            if asyncio.iscoroutine(q_res):
-                q_res = await q_res
-                
-            if not q_res:
-                print("  Quant Analysis Failed.")
-                continue
-                
-            print(f"  Score: {q_res.get('score', 'N/A')} {q_res.get('direction', 'N/A')}")
-            print(f"  Score: {q_res.get('score', 'N/A')} {q_res.get('direction', 'N/A')}")
-            print(f"  ML Prob: {q_res.get('ml_prob', 0):.4f}")
-            print(f"  Details: {q_res.get('details', {})}")
-            print(f"  H4 Trend: {q_res.get('h4_trend')} | H1 Trend: {q_res.get('details', {}).get('H1')}")
-            print(f"  ADX: {q_res.get('features', {}).get('adx', 0):.2f}")
-            
-            # 3. Analyst Analysis
-            a_res = strategy.analyst.analyze_session(symbol, q_res.get('data'))
-            if asyncio.iscoroutine(a_res):
-                a_res = await a_res
-                
-            print(f"  Regime: {a_res.get('regime', 'unknown')}")
-            
-            # Validation Logic
-            # Check if _get_adaptive_threshold is async
-            # Check if _get_adaptive_threshold is async
-            threshold = settings.MIN_CONFLUENCE_SCORE
-            # if asyncio.iscoroutine(threshold):
-            #     threshold = await threshold
-
-            is_valid = False
-            score = q_res.get('score', 0)
-            ml_prob = q_res.get('ml_prob', 0.5)
-
-            if score >= threshold: 
-                is_valid = True
-                print(f"  -> VALID (Score {score} >= {threshold})")
-            elif score >= 2 and (ml_prob > 0.85 or ml_prob < 0.15):
-                is_valid = True
-                print(f"  -> VALID (ML Boost)")
-            if is_valid:
-                # 4. Risk Check (Simulated)
-                print(f"  [RISK] Checking execution constraints...")
-                # We need a dummy position list for debug
-                dummy_positions = [] 
-                
-                # Check Execution (Symbol, Direction, SL, TP) - SL/TP need calculation or dummy
-                # Quick approx for debug
-                atr = q_res['features'].get('atr', 0.001)
-                sl_dist = atr * settings.ATR_SL_MULTIPLIER
-                tp_dist = atr * settings.ATR_TP_MULTIPLIER
-                
-                # Close price
-                close = q_res['features'].get('close')
-                if q_res['direction'] == 'BUY':
-                    sl = close - sl_dist
-                    tp = close + tp_dist
-                else:
-                    sl = close + sl_dist
-                    tp = close - tp_dist
-                    
-                allowed, reason = strategy.risk_manager.check_execution(symbol, q_res['direction'], sl, tp, dummy_positions)
-                if allowed:
-                    print(f"  [RISK] -> PASSED")
-                    
-                    # 5. Researcher Debate
-                    print(f"  [RESEARCHER] Initiating Bull/Bear Debate...")
-                    # Prepare mock attributes (usually passed from PairAgent)
-                    attributes = {settings.TIMEFRAME: q_res.get('data')} 
-                    analyst_mock = {'regime': a_res.get('regime')}
-                    
-                    research = await strategy.researcher.conduct_research(symbol, q_res, analyst_mock)
-                    
-                    print(f"    Action: {research['action']}")
-                    print(f"    Conf:   {research['confidence']}%")
-                    print(f"    Reason: {research['reason']}")
-                    
-                    if research['action'] == q_res['direction']:
-                         print(f"  => TRADE APPROVED by Swarm")
-                    else:
-                         print(f"  => TRADE BLOCKED by Researcher")
-
-                else:
-                    print(f"  [RISK] -> BLOCKED: {reason}")
-
-            else:
-                print(f"  -> REJECTED")
- 
-        except Exception:
-            print("  Analysis Crashed:")
-            print(traceback.format_exc())
-
-    client.shutdown()
+        # 2. Initialize Strategy (Coordinator)
+        print("[INIT] Initializing Strategy & Agents...")
+        strategy = InstitutionalStrategy(client)
+        
+        # Verify Agent Count
+        print(f"[TEST] Created {len(strategy.agents)} Pair Agents.")
+        
+        # 4. Run Scan Loop
+        print("\n[ACTION] Running Scan Loop for ALL pairs...")
+        await strategy.run_scan_loop()
+        
+        # Filter agents to only these for debug (if they exist in settings)
+        # We can't easily remove them from strategy.agents as it's a dict, 
+        # but we can filter the loop or just let it run if not too many.
+        # Let's just run the full scan loop, but maybe limit concurrency if needed.
+        # Or better, just let it run as normal to catch everything.
+        
+        print(f"[TEST] Target Symbols: {list(strategy.agents.keys())}")
+        
+        # 4. Run Scan Loop
+        print("\n[ACTION] Running Scan Loop...")
+        await strategy.run_scan_loop()
+        
+        print("\n[DONE] Scan Complete.")
+        
+    except Exception as e:
+        print(f"\n[CRITICAL] Scan Crashed: {e}")
+        traceback.print_exc()
+    finally:
+        client.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(debug_scan())
+    try:
+        asyncio.run(debug_scan_session())
+    except KeyboardInterrupt:
+        pass
