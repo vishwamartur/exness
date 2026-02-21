@@ -42,12 +42,22 @@ class MT5Client:
         
         suffix_detected = None  # Track which suffix works
         
+        # Quote currencies we do NOT trade (non-USD denominated exotics)
+        BLOCKED_QUOTE_CCY = {'KRW', 'CNH', 'CNY', 'ZAR', 'TRY', 'HUF', 'CZK', 'SEK', 'NOK', 'DKK'}
+
         for base in settings.ALL_BASE_SYMBOLS:
             matched = None
             for suffix in settings.EXNESS_SUFFIXES:
                 candidate = base + suffix
                 info = mt5.symbol_info(candidate)
                 if info is not None:
+                    # Skip trade-disabled / reference symbols (e.g. BTCKRW)
+                    # trade_mode: 0=DISABLED, 1=LONGONLY, 2=SHORTONLY, 4=FULL
+                    if info.trade_mode == 0:
+                        break  # disabled — skip all suffixes for this base
+                    # Skip non-USD quote currencies
+                    if info.currency_profit in BLOCKED_QUOTE_CCY:
+                        break
                     # Enable it in Market Watch if not visible
                     if not info.visible:
                         mt5.symbol_select(candidate, True)

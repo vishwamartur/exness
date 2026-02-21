@@ -1,0 +1,184 @@
+:root {
+  --bg-base:    #0a0e17;
+  --bg-card:    #111827;
+  --bg-card2:   #161d2e;
+  --bg-hover:   #1e2942;
+  --border:     #1e2942;
+  --border-glow:#2563eb33;
+
+  --green:      #22c55e;
+  --green-dim:  #14532d;
+  --red:        #ef4444;
+  --red-dim:    #7f1d1d;
+  --yellow:     #eab308;
+  --blue:       #3b82f6;
+  --blue-dim:   #1e3a8a;
+  --purple:     #a855f7;
+
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #4b5563;
+
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius:  8px;
+  --radius-lg: 12px;
+  --shadow: 0 4px 24px #00000066;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ─── Cards ─── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── Badge ─── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-green  { background: var(--green-dim);   color: var(--green); }
+.badge-red    { background: var(--red-dim);     color: var(--red); }
+.badge-blue   { background: var(--blue-dim);    color: var(--blue); }
+.badge-yellow { background: #3f3205;            color: var(--yellow); }
+
+/* ─── Stat number ─── */
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: -.02em;
+}
+.stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ─── Table ─── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.data-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.data-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--bg-hover); }
+
+/* ─── Pulse dot ─── */
+.pulse {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s infinite;
+  display: inline-block;
+}
+.pulse.red { background: var(--red); }
+.pulse.yellow { background: var(--yellow); }
+
+@keyframes pulse {
+  0%,100% { opacity: 1; box-shadow: 0 0 0 0 #22c55e55; }
+  50%      { opacity: .7; box-shadow: 0 0 0 5px #22c55e00; }
+}
+
+/* ─── Progress bar ─── */
+.progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+
+/* ─── Scrollable log ─── */
+.log-container {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column-reverse;
+}
+.log-entry {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  border-left: 2px solid transparent;
+  line-height: 1.6;
+}
+.log-entry:hover { background: var(--bg-hover); }
+.log-entry.trade  { color: var(--green);  border-color: var(--green); }
+.log-entry.scan   { color: var(--blue);   border-color: var(--blue); }
+.log-entry.reject { color: var(--red);    border-color: var(--red); }
+.log-entry.info   { color: var(--text-secondary); border-color: var(--border); }
+
+/* ─── Glow card states ─── */
+.card-candidate { border-color: var(--green); box-shadow: 0 0 12px #22c55e22; }
+.card-rejected  { border-color: var(--border); }
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn .3s ease; }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.slide-in { animation: slideIn .25s ease; }

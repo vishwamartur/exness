@@ -124,12 +124,17 @@ MAX_TAIL_RISK_LOSS_USD = float(os.getenv("MAX_TAIL_RISK_LOSS_USD", 30.0)) # Hard
 KILL_SWITCH_LOOKBACK_TRADES = int(os.getenv("KILL_SWITCH_LOOKBACK_TRADES", 15)) # Relaxed from 5
 KILL_SWITCH_LOSS_THRESHOLD = float(os.getenv("KILL_SWITCH_LOSS_THRESHOLD", -60.0)) # If last 15 trades lost > $60, disable
 
-# Override Risk Checks for specific symbols (User Request)
-RISK_OVERRIDE_SYMBOLS = ["BTCUSD", "XAUUSD"]
+# Override Risk Checks for specific symbols (bypass kill-switch & payoff mandate)
+# Add any symbol that should always be allowed to trade regardless of stats
+RISK_OVERRIDE_SYMBOLS_BASE = ["EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "XAUUSD", "ETHUSD"]
+# Also handle suffixed variants (m, c) at runtime
+RISK_OVERRIDE_SYMBOLS = RISK_OVERRIDE_SYMBOLS_BASE + \
+    [s + sfx for s in RISK_OVERRIDE_SYMBOLS_BASE for sfx in ('m', 'c', 'z')]
 
 # 3. Asymmetric Payoff Mandate
-MANDATE_MIN_RR = True # Enforce strictly
-AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 1.0)) # AvgLoss can be equal to AvgWin (Relaxed from 0.6)
+MANDATE_MIN_RR = True  # Enforce, but only for symbols NOT in RISK_OVERRIDE_SYMBOLS
+# Threshold raised 1.0 -> 2.0: only blocks if AvgLoss > 2x AvgWin (truly bad symbols)
+AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0))
 
 # Trailing Stop (ATR Based)
 TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR

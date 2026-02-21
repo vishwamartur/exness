@@ -143,18 +143,22 @@ class RiskManager:
             return False, f"News Blackout: {event_name}"
 
         # 5. Scalp Session Filter (London Open & NY Open ONLY)
+        #    Crypto trades 24/7 — exempt from session gate
         if getattr(settings, 'SCALP_SESSION_FILTER', False):
-            current_hour = datetime.now(timezone.utc).hour
-            in_session = any(
-                s['start'] <= current_hour < s['end']
-                for s in getattr(settings, 'SCALP_SESSIONS', [])
-            )
-            if not in_session:
-                session_str = ', '.join(
-                    f"{s['name']} ({s['start']}:00-{s['end']}:00 UTC)"
+            crypto_bases = ('BTC', 'ETH', 'LTC', 'XRP', 'BCH', 'BNB', 'SOL', 'ADA', 'DOT')
+            is_crypto = any(symbol.upper().startswith(b) for b in crypto_bases)
+            if not is_crypto:
+                current_hour = datetime.now(timezone.utc).hour
+                in_session = any(
+                    s['start'] <= current_hour < s['end']
                     for s in getattr(settings, 'SCALP_SESSIONS', [])
                 )
-                return False, f"Off-Session (UTC {current_hour}:00 | Active: {session_str})"
+                if not in_session:
+                    session_str = ', '.join(
+                        f"{s['name']} ({s['start']}:00-{s['end']}:00 UTC)"
+                        for s in getattr(settings, 'SCALP_SESSIONS', [])
+                    )
+                    return False, f"Off-Session (UTC {current_hour}:00 | Active: {session_str})"
 
         return True, "OK"
 

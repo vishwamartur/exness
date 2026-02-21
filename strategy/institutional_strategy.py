@@ -174,6 +174,59 @@ class InstitutionalStrategy:
         # -- Report --
         self._print_scan_summary(scan_status)
 
+        # ── Broadcast to dashboard ────────────────────────────────────────
+        if self.on_event:
+            # 1. Full scan summary with per-symbol reasons
+            self.on_event({
+                "type": "SCAN_SUMMARY",
+                "symbols": scan_status,
+                "count": len(self.agents),
+                "candidates": len(candidates),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
+            # 2. Live position update with P&L
+            try:
+                import MetaTrader5 as _mt5
+                raw_positions = _mt5.positions_get() or []
+                pos_list = []
+                for p in raw_positions:
+                    pos_list.append({
+                        "ticket":        p.ticket,
+                        "symbol":        p.symbol,
+                        "type":          p.type,          # 0=BUY, 1=SELL
+                        "direction":     "BUY" if p.type == 0 else "SELL",
+                        "volume":        p.volume,
+                        "entry_price":   p.price_open,
+                        "price_current": p.price_current,
+                        "sl_price":      p.sl,
+                        "tp_price":      p.tp,
+                        "profit":        p.profit,
+                    })
+                self.on_event({
+                    "type": "POSITION_UPDATE",
+                    "positions": pos_list,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+
+                # 3. Account info
+                acct = _mt5.account_info()
+                if acct:
+                    self.on_event({
+                        "type": "ACCOUNT_UPDATE",
+                        "account": {
+                            "balance":  acct.balance,
+                            "equity":   acct.equity,
+                            "profit":   acct.profit,
+                            "currency": acct.currency,
+                            "leverage": acct.leverage,
+                            "day_pl":   round(acct.equity - acct.balance, 2),
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+            except Exception:
+                pass
+
         if candidates:
             # Sort by Score desc, then ML prob desc
             candidates.sort(key=lambda x: (x['score'], x['ml_prob']), reverse=True)
@@ -265,8 +318,19 @@ class InstitutionalStrategy:
         sl_dist = setup['sl_distance']
         tp_dist = setup['tp_distance']
         
-        if sl_dist <= 0: return 
-        
+        if sl_dist <= 0: return
+
+        # Guard 1: Never execute NEUTRAL direction
+        if direction not in ('BUY', 'SELL'):
+            print(f"[RISK] Execution Blocked: direction '{direction}' is not BUY/SELL")
+            return
+
+        # Guard 2: Verify symbol is tradeable (not disabled/reference instrument)
+        _sym_info = mt5.symbol_info(symbol)
+        if _sym_info is None or _sym_info.trade_mode == 0:
+            print(f"[RISK] Execution Blocked: {symbol} trade_mode=DISABLED (not a tradeable instrument)")
+            return
+
         # R:R Mandate (Asymmetric Payoff)
         if getattr(settings, "MANDATE_MIN_RR", False):
             rr_ratio = tp_dist / sl_dist

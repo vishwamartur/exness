@@ -34,9 +34,31 @@ async def main():
 
     # 1.8 Start Stream Server
     try:
-        start_server()
+        port = start_server()
     except Exception as e:
         print(f"Failed to start stream server: {e}")
+        port = 8000
+
+    # 1.9 Launch React Dashboard
+    import subprocess, webbrowser, pathlib
+    dashboard_dir = pathlib.Path(__file__).parent / "dashboard"
+    if dashboard_dir.exists():
+        try:
+            subprocess.Popen(
+                "npm run dev",
+                cwd=str(dashboard_dir),
+                shell=True,                          # Required on Windows (npm is npm.cmd)
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("[DASHBOARD] Vite dev server starting at http://localhost:5173")
+            await asyncio.sleep(3)   # let Vite warm up
+            webbrowser.open("http://localhost:5173")
+            print("[DASHBOARD] Opened in browser ✓")
+        except Exception as e:
+            print(f"[DASHBOARD] Could not launch dashboard: {e}")
+    else:
+        print("[DASHBOARD] dashboard/ folder not found — run 'cd dashboard && npm install' first")
 
     # 2. Initialize Strategy
     try:
