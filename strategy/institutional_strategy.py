@@ -32,6 +32,7 @@ from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
 from analysis.researcher_agent import ResearcherAgent
 from analysis.critic_agent import CriticAgent
+from utils.telegram_notifier import get_notifier as _tg
 
 def _get_asset_class(symbol):
     if symbol in getattr(settings, 'SYMBOLS_CRYPTO', []): return 'crypto'
@@ -83,6 +84,13 @@ class InstitutionalStrategy:
                 analyst_agent=self.analyst,
                 risk_manager=self.risk_manager
             )
+
+        # Telegram startup greeting
+        _tg().info(
+            f"🤖 <b>MT5 Bot Started</b>\n"
+            f"Scanning <b>{len(settings.SYMBOLS)}</b> pairs on M1\n"
+            f"Session: London 07-10 UTC | NY 13-16 UTC"
+        )
 
     # =======================================================================
     #  SCANNER LOOP (Orchestrator)
@@ -246,6 +254,9 @@ class InstitutionalStrategy:
                     print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error]")
             
             best = candidates[0]
+
+            # Telegram: alert on signals
+            _tg().scan_candidates(candidates)
             
             # --- AGENT DEBATE (Researcher) -------------------------------
             print(f"\n[RESEARCHER] Reviewing best candidate: {best['symbol']}...")
@@ -379,6 +390,8 @@ class InstitutionalStrategy:
         res = self.client.place_order(cmd, symbol, lot, sl, tp)
         if res:
             print(f"[OK] ORDER FILLED: {symbol}")
+            # Telegram alert
+            _tg().trade_executed(symbol, direction, lot, price, sl, tp)
             if self.on_event:
                 self.on_event({
                     "type": "TRADE_EXECUTION",
