@@ -3,6 +3,7 @@ Risk Manager Layer
 Centralizes all pre-trade risk checks and position sizing.
 """
 import time
+import numpy as np
 from datetime import datetime, timezone, timedelta
 import MetaTrader5 as mt5
 from config import settings
@@ -67,11 +68,16 @@ class RiskManager:
         if time.time() - self.last_stats_update.get(symbol, 0) > 300:
              self._update_symbol_stats(symbol)
              
-        if not self._check_kill_switch(symbol):
-             return False, f"Kill Switch Active (Loss Limit Hit)"
-             
-        if not self._check_payoff_mandate(symbol):
-             return False, f"Payoff Mandate Fail (AvgLoss > {settings.AVG_LOSS_RATIO_THRESHOLD}x AvgWin)"
+        # Override Check (User Request)
+        if symbol in getattr(settings, "RISK_OVERRIDE_SYMBOLS", []):
+            # Skip checks for whitelisted symbols
+            pass
+        else:
+            if not self._check_kill_switch(symbol):
+                 return False, f"Kill Switch Active (Loss Limit Hit)"
+                 
+            if not self._check_payoff_mandate(symbol):
+                 return False, f"Payoff Mandate Fail (AvgLoss > {settings.AVG_LOSS_RATIO_THRESHOLD}x AvgWin)"
             
         # 1.5 Daily Loss Limit (Expectancy Guard)
         # We need to calculate realized P&L for today.
@@ -135,6 +141,20 @@ class RiskManager:
         is_blocked, event_name = is_news_blackout(symbol)
         if is_blocked:
             return False, f"News Blackout: {event_name}"
+
+        # 5. Scalp Session Filter (London Open & NY Open ONLY)
+        if getattr(settings, 'SCALP_SESSION_FILTER', False):
+            current_hour = datetime.now(timezone.utc).hour
+            in_session = any(
+                s['start'] <= current_hour < s['end']
+                for s in getattr(settings, 'SCALP_SESSIONS', [])
+            )
+            if not in_session:
+                session_str = ', '.join(
+                    f"{s['name']} ({s['start']}:00-{s['end']}:00 UTC)"
+                    for s in getattr(settings, 'SCALP_SESSIONS', [])
+                )
+                return False, f"Off-Session (UTC {current_hour}:00 | Active: {session_str})"
 
         return True, "OK"
 
@@ -213,10 +233,15 @@ class RiskManager:
     def check_execution(self, symbol, direction, sl, tp, active_positions=[]):
         """
         Final checks run just BEFORE placing an order.
-        Checks: Correlation, Profitability (Commission Awareness).
+        Checks: Max concurrent trades, Correlation, Profitability.
         """
-        # 5. Correlation Filter
-        conflict, reason = check_correlation_conflict(symbol, direction, active_positions)
+        # 5a. Hard cap on concurrent scalp trades
+        max_trades = getattr(settings, 'MAX_CONCURRENT_TRADES', 3)
+        if len(active_positions) >= max_trades:
+            return False, f"Max Concurrent Trades ({max_trades}) reached"
+
+        # 5b. Live Correlation Filter (dynamic — uses recent price returns)
+        conflict, reason = self._check_live_correlation(symbol, direction, active_positions)
         if conflict:
             return False, f"Correlation Conflict: {reason}"
 
@@ -271,52 +296,92 @@ class RiskManager:
         self.state.set("daily_trades", self.daily_trades)
         self.last_trade_time[symbol] = time.time()
 
+    def _check_live_correlation(self, symbol, direction, active_positions):
+        """
+        Live correlation check using recent M1 returns.
+        Falls back to static group check if data unavailable.
+        """
+        if not active_positions:
+            return False, ""
+        try:
+            # Fetch last 60 bars for candidate symbol
+            rates_c = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 60)
+            if rates_c is None or len(rates_c) < 10:
+                # Fall back to static
+                return check_correlation_conflict(symbol, direction, active_positions)
+            returns_c = np.diff(np.array([r['close'] for r in rates_c]))
+
+            for pos in active_positions:
+                pos_symbol = pos.symbol if hasattr(pos, 'symbol') else str(pos)
+                pos_dir = 'BUY' if (hasattr(pos, 'type') and pos.type == 0) else 'SELL'
+                rates_p = mt5.copy_rates_from_pos(pos_symbol, mt5.TIMEFRAME_M1, 0, 60)
+                if rates_p is None or len(rates_p) < 10:
+                    continue
+                returns_p = np.diff(np.array([r['close'] for r in rates_p]))
+                min_len = min(len(returns_c), len(returns_p))
+                if min_len < 5:
+                    continue
+                corr = np.corrcoef(returns_c[-min_len:], returns_p[-min_len:])[0, 1]
+
+                # Block if correlation is very high AND adding to same directional exposure
+                if abs(corr) > 0.85:
+                    # Positively correlated: block same direction
+                    # Negatively correlated: block opposite direction
+                    if (corr > 0 and direction == pos_dir) or (corr < 0 and direction != pos_dir):
+                        return True, f"Live Corr {corr:.2f} with {pos_symbol} ({pos_dir})"
+        except Exception:
+            # Fall back to static on any error
+            return check_correlation_conflict(symbol, direction, active_positions)
+        return False, ""
+
     def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0):
         """
-        Calculates dynamic lot size based on risk percent and confluence.
-        High Confluence (6+) -> Max Risk
-        Medium (5) -> Avg Risk
-        Low (3-4) -> Min Risk
-        scaling_factor: Float (0.0-1.0) to reduce size (e.g. Volatile regime)
+        Calculates dynamic lot size using Quarter-Kelly when history available.
+        Falls back to confluence tiers when insufficient trade history.
         """
-        base_risk = settings.RISK_PERCENT 
-        max_risk = settings.MAX_RISK_PERCENT
+        # ── Kelly Criterion ──────────────────────────────────────────────────
+        kelly_risk_pct = None
+        if getattr(settings, 'USE_KELLY', False):
+            stats = self.symbol_stats.get(symbol, {})
+            win_rate = stats.get('win_rate', 0)
+            avg_win  = stats.get('avg_win', 0)
+            avg_loss = stats.get('avg_loss', 0)
+            count    = stats.get('count', 0)
 
+            if count >= settings.KELLY_MIN_TRADES and avg_loss > 0 and avg_win > 0:
+                rr = avg_win / avg_loss           # reward-to-risk ratio
+                kelly_f = win_rate - (1 - win_rate) / rr  # full Kelly fraction
+                kelly_f = max(0.0, kelly_f)       # never negative
+                kelly_risk_pct = min(
+                    kelly_f * settings.KELLY_FRACTION * 100,  # quarter-Kelly → %
+                    settings.MAX_RISK_PERCENT                  # hard cap
+                )
+
+        # ── Confluence Tier Fallback ─────────────────────────────────────────
+        base_risk = settings.RISK_PERCENT
+        max_risk  = settings.MAX_RISK_PERCENT
         if confluence_score >= 6:
-            risk_pct = max_risk
+            tier_risk = max_risk
         elif confluence_score >= 5:
-            risk_pct = (base_risk + max_risk) / 2
+            tier_risk = (base_risk + max_risk) / 2
         else:
-            risk_pct = base_risk
-            
-        # Apply regime scaling
+            tier_risk = base_risk
+
+        risk_pct = kelly_risk_pct if kelly_risk_pct is not None else tier_risk
         risk_pct *= scaling_factor
-            
+
         # Ensure we have client reference to calculate
         if self.client:
             lot = self.client.calculate_lot_size(symbol, sl_pips, risk_pct)
             
             # --- TAIL RISK CLAMP ---
-            # For dangerous symbols, enforce hard dollar cap
             if symbol in getattr(settings, "TAIL_RISK_SYMBOLS", []):
-                # Calculate Risk amount in USD for this lot
-                # Risk = (Entry - SL) * pip_value * lot
-                # Easier: logic used in calculate_lot_size is Risk = Balance * %
-                # We want Lot such that Lot * RiskPerLot <= MAX_CAP
-                
-                # Reverse engineer:
-                # current_risk_usd = (balance * risk_pct / 100)
-                # If current_risk_usd > CAP, reduce lot.
-                
                 balance = self.client.get_account_balance()
                 planned_risk_usd = balance * risk_pct / 100.0
                 
                 if planned_risk_usd > settings.MAX_TAIL_RISK_LOSS_USD:
-                    # Scaling ratio
                     scale = settings.MAX_TAIL_RISK_LOSS_USD / planned_risk_usd
                     lot = lot * scale
-                    
-                    # Re-normalize to steps
                     symbol_info = mt5.symbol_info(symbol)
                     if symbol_info:
                         step = symbol_info.volume_step
@@ -325,6 +390,7 @@ class RiskManager:
                         
             return lot
         return 0.01
+
 
     def monitor_positions(self, symbol, positions, current_tick, atr=None):
         """

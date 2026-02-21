@@ -60,7 +60,8 @@ SYMBOLS_CRYPTO = []
 SYMBOLS_COMMODITIES = []
 
 
-TIMEFRAME = os.getenv("TIMEFRAME", "M15")  # M15 for institutional quality
+TIMEFRAME = "M1"  # Hardcoded for Scalping (User Request)
+print(f"[SETTINGS] TIMEFRAME set to: {TIMEFRAME}")
 LOT_SIZE = float(os.getenv("LOT_SIZE", 0.10))  # Bulk sizing baseline
 DEVIATION = int(os.getenv("DEVIATION", 20))
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
@@ -79,6 +80,11 @@ SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 3))     # AGGRESSIVE: S
 RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.50))   # AGGRESSIVE: 50% Confidence (Was 0.65)
 MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.5)) # Relaxed 1:1.5 R:R
 
+# ─── Kelly Criterion Position Sizing ─────────────────────────────────────
+USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Criterion
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))  # Quarter-Kelly (safer, avoids ruin)
+KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))   # Min trades before Kelly activates
+
 # Cost Awareness
 COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
 MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit must cover Commission x 2
@@ -90,9 +96,24 @@ RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))  # Scale up for A+ se
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 20))     # Cap daily trade count (Reduced from 100)
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0)) # Stop trading if daily loss > $50
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
 MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 150.0))  # Commodities (~$0.50 spread on Gold)
+
+# ─── Volatility-Adaptive Entry ───────────────────────────────────────────
+# Minimum ATR required to enter a scalp trade (avoid dead/ranging markets)
+VOLATILITY_ATR_MIN = float(os.getenv("VOLATILITY_ATR_MIN", 0.00015))  # 1.5 pips min for Forex M1
+VOLATILITY_ATR_MIN_CRYPTO = float(os.getenv("VOLATILITY_ATR_MIN_CRYPTO", 50.0))  # $50 min for Crypto
+VOLATILITY_ATR_MIN_COMMODITY = float(os.getenv("VOLATILITY_ATR_MIN_COMMODITY", 0.5))  # 50c min for Commodities
+
+# ─── Strict Scalp Session Windows (UTC) ──────────────────────────────────
+# ONLY trade during London Open and NY Open for tight spreads + volume
+SCALP_SESSION_FILTER = os.getenv("SCALP_SESSION_FILTER", "True").lower() == "true"
+SCALP_SESSIONS = [
+    {"name": "London Open", "start": 7, "end": 10},   # 07:00-10:00 UTC
+    {"name": "NY Open",     "start": 13, "end": 16},  # 13:00-16:00 UTC
+]
 
 # ─── Advanced Risk Controls (P&L Distribution Correction) ────────────────
 # 1. Tail Risk Isolation
@@ -102,6 +123,9 @@ MAX_TAIL_RISK_LOSS_USD = float(os.getenv("MAX_TAIL_RISK_LOSS_USD", 30.0)) # Hard
 # 2. Kill Switch (Auto-Disable Bad Symbols)
 KILL_SWITCH_LOOKBACK_TRADES = int(os.getenv("KILL_SWITCH_LOOKBACK_TRADES", 15)) # Relaxed from 5
 KILL_SWITCH_LOSS_THRESHOLD = float(os.getenv("KILL_SWITCH_LOSS_THRESHOLD", -60.0)) # If last 15 trades lost > $60, disable
+
+# Override Risk Checks for specific symbols (User Request)
+RISK_OVERRIDE_SYMBOLS = ["BTCUSD", "XAUUSD"]
 
 # 3. Asymmetric Payoff Mandate
 MANDATE_MIN_RR = True # Enforce strictly
@@ -119,8 +143,15 @@ PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.25))  # Clo
 BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 0.8))  # Move SL to breakeven at 0.8R (Was 0.6R)
 
 # ─── Multi-Timeframe Trend Filters ───────────────────────────────────────
-H1_TREND_FILTER = True
-H4_TREND_FILTER = False  # Disabled to allow ML-based reversals (Scalping)
+M5_TREND_FILTER = os.getenv("M5_TREND_FILTER", "True").lower() == "true"   # M5 confirms M1 direction
+H1_TREND_FILTER = os.getenv("H1_TREND_FILTER", "True").lower() == "true"
+H4_TREND_FILTER = os.getenv("H4_TREND_FILTER", "True").lower() == "true"   # Prevent counter-trend trades
+
+# ─── News Integration ────────────────────────────────────────────────────
+NEWS_CALENDAR_URL = os.getenv("NEWS_CALENDAR_URL", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")
+NEWS_CALENDAR_CACHE_MINUTES = int(os.getenv("NEWS_CALENDAR_CACHE_MINUTES", 60))  # Refresh every 60 min
+NEWS_PRE_MINUTES = int(os.getenv("NEWS_PRE_MINUTES", 15))   # Block 15 min before high-impact news
+NEWS_POST_MINUTES = int(os.getenv("NEWS_POST_MINUTES", 15)) # Block 15 min after high-impact news
 
 # ─── Session Awareness (UTC hours) ──────────────────────────────────────
 TRADE_SESSIONS = {

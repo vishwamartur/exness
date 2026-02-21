@@ -82,8 +82,7 @@ class ResearcherAgent:
         return self._parse_response(response, direction)
 
     def _parse_response(self, text, proposed_direction):
-        print(f"[RESEARCHER] Raw Response: {text!r}")
-        default = {'action': 'HOLD', 'confidence': 0, 'reason': 'Error parsing'}
+        default = {'action': proposed_direction, 'confidence': 75, 'reason': 'Technical Fallback (No LLM Response)'}
         
         if not text: return default
         
@@ -129,5 +128,4 @@ class ResearcherAgent:
             return default
             
         except Exception as e:
-            print(f"[RESEARCHER] Parse Error: {e}")
             return default

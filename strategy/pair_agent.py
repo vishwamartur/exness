@@ -113,13 +113,19 @@ class PairAgent:
             # Ideally PairAgent is autonomous.
             
             # Fetch Primary Data
-            df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 500)
+            df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000) # Increased for Scalping Indicators (M1)
+            
             if df is None or len(df) < 100:
                 return None, "Insufficient Data"
 
             data_dict = {self.timeframe: df}
             
             # Fetch Multi-Timeframe Data if enabled
+            if getattr(settings, 'M5_TREND_FILTER', False):
+                 m5 = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 100)
+                 if m5 is not None:
+                    data_dict['M5'] = m5
+            
             if settings.H1_TREND_FILTER:
                  h1 = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 100)
                  if h1 is not None:
@@ -196,8 +202,29 @@ class PairAgent:
 
         # Construct
         atr = q_res['features'].get('atr', 0)
+
+        # 2. Volatility-Adaptive Entry: skip dead markets
+        if atr > 0:
+            if self.symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
+                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN_CRYPTO', 50.0)
+            elif self.symbol in getattr(settings, 'SYMBOLS_COMMODITIES', []):
+                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN_COMMODITY', 0.5)
+            else:
+                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN', 0.00015)
+            if atr < atr_min:
+                return None, f"Low Volatility (ATR {atr:.6f} < {atr_min})"
+
+        # 3. Spread-Adjusted TP/SL
+        tick = mt5.symbol_info_tick(self.symbol)
+        spread_price = (tick.ask - tick.bid) if tick else 0.0
+
         sl_dist = atr * settings.ATR_SL_MULTIPLIER
-        tp_dist = atr * settings.ATR_TP_MULTIPLIER
+        tp_dist = atr * settings.ATR_TP_MULTIPLIER + spread_price  # net of spread cost
+
+        # Enforce minimum TP > 3x spread (ensures net profit is positive)
+        min_tp = spread_price * 3
+        if tp_dist < min_tp:
+            tp_dist = min_tp
         
         # Enforce Min Risk:Reward
         if sl_dist > 0:
@@ -209,17 +236,18 @@ class PairAgent:
             'symbol': self.symbol,
             'direction': signal,
             'score': score,
-            'entry_price': 0, # Filled at execution
-            'ensemble_score': q_res.get('ensemble_score', 0), # Add ensemble score
-            'ml_prob': prob, # Use corrected directional probability
+            'entry_price': 0,          # Filled at execution
+            'entry_type': 'MARKET',    # Default; BOS overrides to LIMIT
+            'ensemble_score': q_res.get('ensemble_score', 0),
+            'ml_prob': prob,
             'regime': regime,
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
-            'scaling_factor': 1.0, # Could be dynamic based on regime
-            'scaling_factor': 1.0, # Could be dynamic based on regime
+            'scaling_factor': 1.0,
+            'm5_trend': q_res.get('m5_trend', 0),  # Log M5 for journal
             'details': q_res.get('details', {}),
-            'features': q_res.get('features', {}), # For Researcher
-            'attributes': data_dict # For Researcher
+            'features': q_res.get('features', {}),
+            'attributes': data_dict
         }
         
         # Boost for A+ Setups
@@ -228,20 +256,17 @@ class PairAgent:
 
         # BOS Override / Fusion
         if bos_res.get('valid'):
-            # If BOS is valid, we can either:
-            # A) Override everything and take the trade
-            # B) Use it to boost the score
-            
-            # Policy: BOS is a strong technical signal.
-            # If ML agrees directionally, it's a Sureshot (Score 10).
-            # If ML is weak/neutral, we still take valid BOS but maybe lower sizing?
-            # User said "Combination beats retail".
-            
             if bos_res['signal'] == candidate['direction']:
                  candidate['score'] = 10
-                 candidate['ml_prob'] = max(candidate['ml_prob'], 0.85) # Boost confidence
+                 candidate['ml_prob'] = max(candidate['ml_prob'], 0.85)
                  candidate['details']['BOS'] = bos_res['reason']
                  candidate['scaling_factor'] = settings.RISK_FACTOR_MAX
+                 # Liquidity Sweep Entry: set LIMIT at 0.5 ATR pullback
+                 candidate['entry_type'] = 'LIMIT'
+                 if signal == 'BUY':
+                     candidate['limit_price'] = bos_res['price'] - (atr * 0.5)
+                 else:
+                     candidate['limit_price'] = bos_res['price'] + (atr * 0.5)
                  return candidate, f"BOS+ML CANDIDATE ({candidate['direction']})"
             
             elif score < 5: # ML didn't find much, but BOS did
@@ -295,9 +320,8 @@ class PairAgent:
              atr = self.latest_atr
         else:
             try:
-                # We can use the data from the last scan or fetch fresh
-                # Fetching fresh M15 50 candles is fast
-                df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 50)
+                # Fetch 200 bars for accurate M1 ATR (was 50 - too small for indicator warmup)
+                df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 200)
                 if df is not None:
                     # Add ATR if needed, or use high-low diff of last candle as approx
                     # Ideally use features lib, but let's keep it lightweight or import features

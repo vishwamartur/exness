@@ -71,7 +71,16 @@ def add_technical_features(df):
         df['vol_sma'] = df['tick_volume'].rolling(window=20).mean()
         df['vol_ratio'] = df['tick_volume'] / df['vol_sma']
 
-    # ─── 6. Market Structure ─────────────────────────────────────────────
+        # ─── 5b. Order Flow / Delta Volume ───────────────────────────────
+        # Signed delta: positive = bullish candle, negative = bearish candle
+        # Approximates buy (uptick) vs sell (downtick) volume pressure on M1
+        candle_dir = np.where(df['close'] >= df['open'], 1, -1)
+        df['delta_vol'] = df['tick_volume'] * candle_dir
+        df['delta_vol_cumsum'] = df['delta_vol'].rolling(window=20).sum()  # 20-bar cumulative delta
+        df['delta_vol_ratio'] = df['delta_vol'] / df['tick_volume'].replace(0, np.nan)  # (-1 to +1)
+        # Normalised flow: > 0 means net buying, < 0 net selling pressure
+        df['delta_vol_ratio'] = df['delta_vol_ratio'].fillna(0)
+
     df = _add_market_structure(df)
     df = _add_order_blocks(df)
     df = _add_fair_value_gaps(df)

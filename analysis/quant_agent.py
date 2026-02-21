@@ -109,7 +109,7 @@ class QuantAgent:
     def analyze(self, symbol, data_dict):
         """
         Full Quant Analysis.
-        Returns dict with score, direction, indicators, and ML probs.
+        Orchestrates signal generation.
         """
         df = data_dict.get(settings.TIMEFRAME)
         if df is None: return None
@@ -124,6 +124,7 @@ class QuantAgent:
         
         # Trends
         h1 = self._compute_trend(data_dict.get('H1'))
+        m5 = self._compute_trend(data_dict.get('M5'))
         h4 = self._compute_trend(data_dict.get('H4'))
         
         # ML Predictions
@@ -135,8 +136,8 @@ class QuantAgent:
         ai_signal = self._get_ai_signal(symbol, df)
         
         # Scoring
-        buy_score, buy_details = self._calculate_confluence(symbol, df, "buy", h1, h4)
-        sell_score, sell_details = self._calculate_confluence(symbol, df, "sell", h1, h4)
+        buy_score, buy_details = self._calculate_confluence(symbol, df, "buy", h1, h4, m5)
+        sell_score, sell_details = self._calculate_confluence(symbol, df, "sell", h1, h4, m5)
         
         best_score = max(buy_score, sell_score)
         direction = "BUY" if buy_score >= sell_score else "SELL"
@@ -227,12 +228,20 @@ class QuantAgent:
     def _ensemble_vote(self, rf, ai, conf):
         return round(0.3*rf + 0.25*((ai+1)/2) + 0.45*(conf/6.0), 3)
 
-    def _calculate_confluence(self, symbol, df, direction, h1, h4):
+    def _calculate_confluence(self, symbol, df, direction, h1, h4, m5=0):
         score = 0
         details = {}
         last = df.iloc[-1]
         
         # Trends
+        if getattr(settings, 'M5_TREND_FILTER', False):
+            # Strict M5 Alignment for Scalping
+            if direction=="buy" and m5==-1: return 0, {'M5':'BLOCK'}
+            if direction=="sell" and m5==1: return 0, {'M5':'BLOCK'}
+            if (direction=="buy" and m5==1) or (direction=="sell" and m5==-1):
+                score+=1; details['M5']='OK'
+            else: details['M5']='-'
+
         if settings.H4_TREND_FILTER:
             if direction=="buy" and h4==-1: return 0, {'H4':'BLOCK'}
             if direction=="sell" and h4==1: return 0, {'H4':'BLOCK'}

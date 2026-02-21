@@ -105,15 +105,79 @@ def _symbol_has_currency(symbol, currency):
     return currency in base
 
 
+# ─── Live Forex Factory Calendar ─────────────────────────────────────────────
+_ff_cache = {'events': [], 'fetched_at': None}
+
+def _fetch_forex_factory_events():
+    """
+    Fetches this week's high-impact events from the Forex Factory JSON feed.
+    Caches for settings.NEWS_CALENDAR_CACHE_MINUTES to avoid excessive requests.
+    Returns list of dicts: {name, currency, dt_utc}
+    """
+    try:
+        from config import settings
+        import urllib.request, json, time as _time
+
+        cache_mins = getattr(settings, 'NEWS_CALENDAR_CACHE_MINUTES', 60)
+        now = datetime.now(timezone.utc)
+
+        if (_ff_cache['fetched_at'] is not None and
+                (now - _ff_cache['fetched_at']).total_seconds() < cache_mins * 60):
+            return _ff_cache['events']
+
+        url = getattr(settings, 'NEWS_CALENDAR_URL',
+                      'https://nfs.faireconomy.media/ff_calendar_thisweek.json')
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            raw = json.loads(resp.read().decode())
+
+        parsed = []
+        for ev in raw:
+            if ev.get('impact', '').lower() != 'high':
+                continue
+            try:
+                # Format: "2024-02-21T13:30:00-0500" or similar
+                dt_str = ev.get('date', '')
+                # Normalise timezone offset format for fromisoformat
+                import re as _re
+                dt_str = _re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2', dt_str)
+                dt = datetime.fromisoformat(dt_str).astimezone(timezone.utc)
+                parsed.append({
+                    'name': ev.get('title', 'Unknown'),
+                    'currency': ev.get('country', '').upper(),
+                    'dt_utc': dt,
+                })
+            except Exception:
+                continue
+
+        _ff_cache['events'] = parsed
+        _ff_cache['fetched_at'] = now
+        return parsed
+    except Exception:
+        return _ff_cache.get('events', [])
+
+
 def is_news_blackout(symbol, now_utc=None):
     """
     Returns (True, event_name) if we should avoid trading this symbol
     due to upcoming or ongoing high-impact news.
+    Checks live Forex Factory feed first, then falls back to hardcoded schedule.
     """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
 
-    # Check daily recurring windows
+    # ── Live Feed Check ──────────────────────────────────────────────────────
+    try:
+        from config import settings
+        pre  = timedelta(minutes=getattr(settings, 'NEWS_PRE_MINUTES', 15))
+        post = timedelta(minutes=getattr(settings, 'NEWS_POST_MINUTES', 15))
+        for ev in _fetch_forex_factory_events():
+            if _symbol_has_currency(symbol, ev['currency']):
+                if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
+                    return True, f"FF:{ev['name']}"
+    except Exception:
+        pass
+
+    # ── Hardcoded Schedule Fallback ───────────────────────────────────────────
     for window in DAILY_AVOID_WINDOWS:
         start = now_utc.replace(hour=window['start_hour'], minute=window['start_minute'], second=0)
         end = now_utc.replace(hour=window['end_hour'], minute=window['end_minute'], second=0)
@@ -123,31 +187,18 @@ def is_news_blackout(symbol, now_utc=None):
                 if _symbol_has_currency(symbol, currency):
                     return True, window['name']
 
-    # Check scheduled events
     for event in HIGH_IMPACT_EVENTS:
-        # Check if this event affects this symbol
-        affects_symbol = False
-        for currency in event['affected']:
-            if _symbol_has_currency(symbol, currency):
-                affects_symbol = True
-                break
-
+        affects_symbol = any(_symbol_has_currency(symbol, c) for c in event['affected'])
         if not affects_symbol:
             continue
-
-        # Check day of week
         if event['day_of_week'] is not None and now_utc.weekday() != event['day_of_week']:
             continue
-
-        # Check week of month (approximate)
         if event['week_of_month'] is not None:
             if _get_week_of_month(now_utc) != event['week_of_month']:
                 continue
 
-        # Check time proximity
         event_time = now_utc.replace(hour=event['hour'], minute=event['minute'], second=0)
         buffer = timedelta(minutes=event.get('buffer_minutes', NEWS_BUFFER_MINUTES))
-
         if (event_time - buffer) <= now_utc <= (event_time + buffer):
             return True, event['name']
 
@@ -155,21 +206,32 @@ def is_news_blackout(symbol, now_utc=None):
 
 
 def get_active_events(now_utc=None):
-    """Returns list of currently active/upcoming news events."""
+    """Returns list of currently active/upcoming news events (live + hardcoded)."""
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
 
     active = []
+
+    # Live feed
+    try:
+        from config import settings
+        pre  = timedelta(minutes=getattr(settings, 'NEWS_PRE_MINUTES', 15))
+        post = timedelta(minutes=getattr(settings, 'NEWS_POST_MINUTES', 15))
+        for ev in _fetch_forex_factory_events():
+            if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
+                active.append(f"FF:{ev['name']}")
+    except Exception:
+        pass
+
+    # Hardcoded fallback
     for event in HIGH_IMPACT_EVENTS:
         if event['day_of_week'] is not None and now_utc.weekday() != event['day_of_week']:
             continue
         if event['week_of_month'] is not None:
             if _get_week_of_month(now_utc) != event['week_of_month']:
                 continue
-
         event_time = now_utc.replace(hour=event['hour'], minute=event['minute'], second=0)
         buffer = timedelta(minutes=event.get('buffer_minutes', NEWS_BUFFER_MINUTES))
-
         if (event_time - buffer) <= now_utc <= (event_time + buffer):
             active.append(event['name'])
 
