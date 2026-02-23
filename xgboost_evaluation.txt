@@ -1,17 +1,18 @@
-==================================================
-  XGBOOST EVALUATION RESULTS (ALL PAIRS)
-==================================================
-Training Symbols: 17
-Total Samples: 168713
-Accuracy: 0.6878
+========================================================
+  XGBOOST EVALUATION RESULTS (MULTI-PAIR)
+========================================================
+Training Symbols : 28 / 28 detected
+Symbol List      : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, EURGBP, EURJPY, EURAUD, EURCAD, EURCHF, GBPJPY, GBPAUD, GBPCAD, GBPCHF, AUDJPY, CADJPY, BTCUSD, ETHUSD, BTCJPY, XAUUSD, XAGUSD, XPTUSD, XPDUSD, USOIL, UKOIL, XNGUSD
+Total Samples    : 277,888
+Accuracy         : 0.6936
               precision    recall  f1-score   support
 
-           0       0.89      0.69      0.77     26279
-           1       0.39      0.69      0.50      7464
+           0       0.95      0.69      0.80     49091
+           1       0.23      0.70      0.35      6487
 
-    accuracy                           0.69     33743
-   macro avg       0.64      0.69      0.63     33743
-weighted avg       0.78      0.69      0.71     33743
+    accuracy                           0.69     55578
+   macro avg       0.59      0.70      0.57     55578
+weighted avg       0.86      0.69      0.75     55578
 
-[[18024  8255]
- [ 2280  5184]]
+[[34005 15086]
+ [ 1941  4546]]

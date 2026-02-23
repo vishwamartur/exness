@@ -18,18 +18,23 @@ SYMBOL = os.getenv("SYMBOL", "EURUSD")
 # Base names — the bot auto-detects the correct suffix for your account
 # (e.g., EURUSD, EURUSDm, EURUSDc depending on Standard/Cent account)
 
-# Pruned for Expectancy Improvement (Focus on majors/crypto)
-# Temporarily commenting out negative expectancy pairs provided by user analysis
+# Majors — always on (tightest spreads, deepest liquidity)
 SYMBOLS_FOREX_MAJORS_BASE = [
-    "EURUSD", "GBPUSD", "USDJPY", # "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
 ]
 
+# Minors — Tier 1 (re-enabled): high liquidity EUR/GBP crosses + JPY majors
+# Spread gate in RiskManager (MAX_SPREAD_PIPS=3.0) auto-blocks during low-liquidity windows
 SYMBOLS_FOREX_MINORS_BASE = [
-    # "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD", "EURCHF", "EURNZD",
-    # "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
-    # "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD",
-    # "NZDJPY", "NZDCAD", "NZDCHF",
-    # "CADJPY", "CADCHF", "CHFJPY",
+    # ── EUR crosses ──────────────────────────────────────────────────────
+    "EURGBP", "EURJPY", "EURAUD", "EURCAD", "EURCHF",
+    # ── GBP crosses ──────────────────────────────────────────────────────
+    "GBPJPY", "GBPAUD", "GBPCAD", "GBPCHF",
+    # ── JPY commodity-currency crosses ───────────────────────────────────
+    "AUDJPY", "CADJPY",
+    # ── Watchlist (low volume / exotic — enable after expectancy confirmed) ─
+    # "EURNZD", "GBPNZD", "AUDCAD", "AUDCHF", "AUDNZD",
+    # "NZDJPY", "NZDCAD", "NZDCHF", "CADCHF", "CHFJPY",
 ]
 
 SYMBOLS_CRYPTO_BASE = [

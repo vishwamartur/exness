@@ -1,10 +1,17 @@
 """
 Train XGBoost Model - Institutional Strategy Ensemble
-Works alongside Random Forest to validate patterns.
+=====================================================
+Aggregate multi-pair training across all detected Exness symbols.
+Works alongside Random Forest and LSTM to construct the ensemble signal.
 
-- Uses same M15 institutional features.
-- Uses ATR-based labelling (dynamic TP/SL).
-- Saves to models/xgboost_v1.pkl
+- Connects to MT5, auto-detects all available symbols
+- Fetches M15 OHLCV for each and engineers the standard feature set
+- Labels using ATR-based TP/SL barriers (matches live trading logic exactly)
+- Trains a single XGBoost classifier on the combined dataset
+- Saves to models/xgboost_v1.pkl + xgboost_v1_features.pkl + xgboost_v1_symbols.txt
+
+Usage:
+    python train_xgboost.py          # requires MT5 to be running and logged in
 """
 
 import pandas as pd
@@ -86,37 +93,43 @@ def train():
     total_symbols = len(settings.SYMBOLS)
     
     print(f"\nStarting data collection for {total_symbols} symbols...")
-    
+    trained_symbols = []   # tracks which symbols actually contributed rows
+
     for i, symbol in enumerate(settings.SYMBOLS, 1):
-        print(f"[{i}/{total_symbols}] Processing {symbol}...", end="\r")
-        
+        print(f"[{i}/{total_symbols}] Fetching {symbol}...", end="\r")
+
         # Fetch data
         df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
         if df is None or df.empty:
+            print(f"[{i}/{total_symbols}] {symbol:>12}  — SKIP (no data)")
             continue
-            
+
         # Feature Engineering
         try:
             df = features.add_technical_features(df)
-            
+
             # Labelling
             df['target'] = apply_atr_barrier(
-                df, 
+                df,
                 atr_tp_mult=settings.ATR_TP_MULTIPLIER,
                 atr_sl_mult=settings.ATR_SL_MULTIPLIER,
                 time_horizon=20
             )
-            
-            # Drop recent data that can't be labelled yet
+
+            # Drop recent (unlabelled) rows
             df = df.iloc[:-21].dropna()
-            
-            # Add symbol column for reference (optional, but good for debugging)
-            # df['symbol'] = symbol 
-            
+
+            rows = len(df)
+            if rows < 100:
+                print(f"[{i}/{total_symbols}] {symbol:>12}  — SKIP ({rows} rows — too few)")
+                continue
+
             all_data.append(df)
-            
+            trained_symbols.append(symbol)
+            print(f"[{i}/{total_symbols}] {symbol:>12}  — OK   ({rows:,} rows)")
+
         except Exception as e:
-            print(f"\nError processing {symbol}: {e}")
+            print(f"[{i}/{total_symbols}] {symbol:>12}  — ERROR: {e}")
             continue
 
     if not all_data:
@@ -182,31 +195,36 @@ def train():
     acc = accuracy_score(y_test, preds)
 
     output = []
-    output.append("="*50)
-    output.append("  XGBOOST EVALUATION RESULTS (ALL PAIRS)")
-    output.append("="*50)
-    output.append(f"Training Symbols: {len(all_data)}")
-    output.append(f"Total Samples: {len(full_df)}")
-    output.append(f"Accuracy: {acc:.4f}")
+    output.append("=" * 56)
+    output.append("  XGBOOST EVALUATION RESULTS (MULTI-PAIR)")
+    output.append("=" * 56)
+    output.append(f"Training Symbols : {len(trained_symbols)} / {total_symbols} detected")
+    output.append(f"Symbol List      : {', '.join(trained_symbols)}")
+    output.append(f"Total Samples    : {len(full_df):,}")
+    output.append(f"Accuracy         : {acc:.4f}")
     output.append(report)
     output.append(str(cm))
-    
+
     output_str = "\n".join(output)
-    print(output_str)
-    
+    print("\n" + output_str)
+
     with open("xgboost_evaluation.txt", "w") as f:
         f.write(output_str)
-    
-    # Save
+
+    # Save model
     model_path = os.path.join(os.path.dirname(settings.MODEL_PATH), "xgboost_v1.pkl")
-    feat_path = model_path.replace('.pkl', '_features.pkl')
-    
+    feat_path  = model_path.replace('.pkl', '_features.pkl')
+    sym_path   = model_path.replace('.pkl', '_symbols.txt')
+
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     joblib.dump(xgb_model, model_path)
     joblib.dump(feature_cols, feat_path)
-    
-    print(f"\nXGBoost model saved to {model_path}")
-    print(f"Features saved to {feat_path}")
+    with open(sym_path, "w") as f:
+        f.write("\n".join(trained_symbols))
+
+    print(f"\nModel   saved → {model_path}")
+    print(f"Features saved → {feat_path}")
+    print(f"Symbols saved  → {sym_path}  ({len(trained_symbols)} pairs)")
 
 
 if __name__ == "__main__":

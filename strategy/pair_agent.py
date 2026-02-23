@@ -8,9 +8,9 @@ from config import settings
 from utils.async_utils import run_in_executor
 from market_data import loader
 from utils.trade_journal import TradeJournal
-from utils.trade_journal import TradeJournal
 from strategy.bos_strategy import BOSStrategy
 from utils.news_filter import is_news_blackout
+from utils.telegram_notifier import get_notifier as _tg
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -40,7 +40,10 @@ class PairAgent:
         self.regime = "UNKNOWN"
         self.last_atr_time = 0
         self.latest_atr = 0.0
-        
+
+        # Track open tickets to detect closes for Telegram alerts
+        self._tracked_positions: Dict[int, Dict] = {}  # {ticket: {direction, entry_price}}
+
         # Performance Thresholds (Self-Correction)
         self.max_consecutive_losses = 3
 
@@ -240,6 +243,7 @@ class PairAgent:
             'entry_type': 'MARKET',    # Default; BOS overrides to LIMIT
             'ensemble_score': q_res.get('ensemble_score', 0),
             'ml_prob': prob,
+            'ai_signal': q_res.get('ai_signal', 0),  # Fix: was missing, caused KeyError in journal
             'regime': regime,
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
@@ -299,6 +303,7 @@ class PairAgent:
         Active trade management:
         1. Standard Risk Management (Trailing/BE/Partial) via RiskManager.
         2. Agent-Specific Logic (e.g. Regime exit).
+        3. Telegram trade-closed alert when a tracked position disappears.
         """
         # We need the client to get positions and execute actions.
         # Assuming risk_manager has the client.
@@ -306,7 +311,37 @@ class PairAgent:
         if not client: return
 
         positions = client.get_positions(self.symbol)
-        if not positions: return
+
+        # ── Detect closed positions and fire Telegram alert ──────────────
+        current_tickets = {p.ticket for p in positions} if positions else set()
+        for ticket, meta in list(self._tracked_positions.items()):
+            if ticket not in current_tickets:
+                # Position closed — fetch P&L from MT5 history
+                try:
+                    from datetime import timedelta
+                    now = datetime.now(timezone.utc)
+                    deals = client.get_history_deals(now - timedelta(hours=4), now)
+                    profit = 0.0
+                    if deals:
+                        for d in deals:
+                            if hasattr(d, 'position_id') and d.position_id == ticket:
+                                profit += d.profit + d.commission + d.swap
+                    _tg().trade_closed(self.symbol, meta.get('direction', '?'), profit)
+                except Exception as _e:
+                    logger.warning(f"[{self.symbol}] trade_closed alert error: {_e}")
+                del self._tracked_positions[ticket]
+
+        # Register any new positions we haven't seen yet
+        if positions:
+            for p in positions:
+                if p.ticket not in self._tracked_positions:
+                    self._tracked_positions[p.ticket] = {
+                        'direction': 'BUY' if p.type == 0 else 'SELL',
+                        'entry_price': p.price_open,
+                    }
+
+        if not positions:
+            return
 
         # Get Data for decision making
         tick = mt5.symbol_info_tick(self.symbol)

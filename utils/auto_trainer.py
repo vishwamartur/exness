@@ -134,6 +134,26 @@ class AutoTrainer:
             self._thread.join(timeout=5)
         print("[AUTO-TRAIN] Stopped")
 
+    def get_status(self) -> dict:
+        """Returns current trainer timing status for display in main loop."""
+        now = time.time()
+        return {
+            'next_rf_in':         max(0, (self.rf_interval   - (now - self.last_rf_train))  / 60),
+            'next_xgb_in':        max(0, (self.xgb_interval  - (now - self.last_xgb_train)) / 60),
+            'next_lstm_in':       max(0, (self.lstm_interval  - (now - self.last_lstm_train))/ 60),
+            'rf_retrains':        self.rf_retrain_count,
+            'lstm_retrains':      self.lstm_retrain_count,
+            'emergency_retrains': self.emergency_retrain_count,
+        }
+
+    def print_status(self):
+        """Prints a one-line trainer status summary (used on shutdown)."""
+        s = self.get_status()
+        print(
+            f"[AUTO-TRAIN] RF:{s['rf_retrains']} XGB:N/A LSTM:{s['lstm_retrains']} "
+            f"Emergency:{s['emergency_retrains']}"
+        )
+
     def _run_loop(self):
         """Main background loop."""
         # Wait 5 minutes before first check to let bot stabilize
@@ -202,23 +222,35 @@ class AutoTrainer:
         print(f"\n[AUTO-TRAIN] RF retrain ({tag})...")
 
         try:
-            # Fetch fresh data
-            symbol = settings.SYMBOLS[0] if settings.SYMBOLS else "EURUSD"
-            df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-            if df is None or len(df) < 500:
-                print("[AUTO-TRAIN] Not enough data for RF retrain")
+            # Aggregate data from all active symbols (mirrors train_xgboost.py)
+            all_frames = []
+            symbols = settings.SYMBOLS if settings.SYMBOLS else ["EURUSD"]
+            for sym in symbols:
+                try:
+                    raw = loader.get_historical_data(sym, "M15", settings.HISTORY_BARS)
+                    if raw is None or len(raw) < 200:
+                        continue
+                    raw = features.add_technical_features(raw)
+                    raw['target'] = _label_with_atr(
+                        raw,
+                        atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+                        atr_sl_mult=settings.ATR_SL_MULTIPLIER
+                    )
+                    raw = raw.iloc[:-21].dropna()
+                    all_frames.append(raw)
+                except Exception:
+                    continue
+
+            if not all_frames:
+                print("[AUTO-TRAIN] No data collected for RF retrain")
                 return
 
-            # Feature engineering
-            df = features.add_technical_features(df)
+            df = pd.concat(all_frames, ignore_index=True)
+            print(f"[AUTO-TRAIN] RF dataset: {len(df)} bars from {len(all_frames)}/{len(symbols)} symbols")
 
-            # Label
-            df['target'] = _label_with_atr(
-                df,
-                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
-                atr_sl_mult=settings.ATR_SL_MULTIPLIER
-            )
-            df = df.iloc[:-21].dropna()
+            if len(df) < 500:
+                print("[AUTO-TRAIN] Not enough data for RF retrain")
+                return
 
             # Prepare features
             drop_cols = ['time', 'open', 'high', 'low', 'close',
@@ -262,9 +294,14 @@ class AutoTrainer:
                 joblib.dump(new_model, settings.MODEL_PATH)
                 joblib.dump(feature_cols, settings.MODEL_PATH.replace('.pkl', '_features.pkl'))
 
-                # Replace in-memory model
-                self.strategy.model = new_model
-                self.strategy.feature_cols = feature_cols
+                # Replace in-memory model on QuantAgent (lives at strategy.quant)
+                quant = getattr(self.strategy, 'quant', None)
+                if quant is not None:
+                    quant.model = new_model
+                    quant.feature_cols = feature_cols
+                    print("[AUTO-TRAIN] RF hot-swapped into QuantAgent.")
+                else:
+                    print("[AUTO-TRAIN] WARNING: strategy.quant not found — model saved to disk only.")
 
             self.rf_retrain_count += 1
             print(f"[AUTO-TRAIN] ✓ RF retrained: accuracy={accuracy:.3f} "
@@ -284,19 +321,35 @@ class AutoTrainer:
         print(f"\n[AUTO-TRAIN] XGBoost retrain ({tag})...")
 
         try:
-            symbol = settings.SYMBOLS[0] if settings.SYMBOLS else "EURUSD"
-            df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-            if df is None or len(df) < 500:
-                print("[AUTO-TRAIN] Not enough data for XGBoost")
+            # Aggregate data from all active symbols
+            all_frames = []
+            symbols = settings.SYMBOLS if settings.SYMBOLS else ["EURUSD"]
+            for sym in symbols:
+                try:
+                    raw = loader.get_historical_data(sym, "M15", settings.HISTORY_BARS)
+                    if raw is None or len(raw) < 200:
+                        continue
+                    raw = features.add_technical_features(raw)
+                    raw['target'] = _label_with_atr(
+                        raw,
+                        atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+                        atr_sl_mult=settings.ATR_SL_MULTIPLIER
+                    )
+                    raw = raw.iloc[:-21].dropna()
+                    all_frames.append(raw)
+                except Exception:
+                    continue
+
+            if not all_frames:
+                print("[AUTO-TRAIN] No data collected for XGBoost retrain")
                 return
 
-            df = features.add_technical_features(df)
-            df['target'] = _label_with_atr(
-                df,
-                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
-                atr_sl_mult=settings.ATR_SL_MULTIPLIER
-            )
-            df = df.iloc[:-21].dropna()
+            df = pd.concat(all_frames, ignore_index=True)
+            print(f"[AUTO-TRAIN] XGB dataset: {len(df)} bars from {len(all_frames)}/{len(symbols)} symbols")
+
+            if len(df) < 500:
+                print("[AUTO-TRAIN] Not enough data for XGBoost")
+                return
 
             drop_cols = ['time', 'open', 'high', 'low', 'close',
                          'tick_volume', 'spread', 'real_volume', 'target']
@@ -339,8 +392,13 @@ class AutoTrainer:
             with self._lock:
                 os.makedirs(MODELS_DIR, exist_ok=True)
                 joblib.dump(new_model, settings.XGB_MODEL_PATH)
-                self.strategy.xgb_model = new_model
-            
+                # Replace in QuantAgent
+                quant = getattr(self.strategy, 'quant', None)
+                if quant is not None:
+                    quant.xgb_model = new_model
+                    print("[AUTO-TRAIN] XGBoost hot-swapped into QuantAgent.")
+                else:
+                    print("[AUTO-TRAIN] WARNING: strategy.quant not found — XGB saved to disk only.")
             print(f"[AUTO-TRAIN] ✓ XGB retrained: accuracy={accuracy:.3f}")
 
         except Exception as e:
@@ -473,7 +531,7 @@ class AutoTrainer:
                     if patience_counter >= patience:
                         break
 
-            # Hot-swap LSTM in strategy
+            # Hot-swap LSTM in QuantAgent
             with self._lock:
                 from strategy.lstm_predictor import LSTMPredictor
                 try:
@@ -482,7 +540,12 @@ class AutoTrainer:
                         scaler_path=os.path.join(MODELS_DIR, f"lstm_{symbol}_scaler.pkl"),
                         device='cuda' if torch.cuda.is_available() else 'cpu'
                     )
-                    self.strategy.lstm_predictors[symbol] = new_predictor
+                    quant = getattr(self.strategy, 'quant', None)
+                    if quant is not None:
+                        quant.lstm_predictors[symbol] = new_predictor
+                        print(f"[AUTO-TRAIN] LSTM {symbol} hot-swapped into QuantAgent.")
+                    else:
+                        print(f"[AUTO-TRAIN] WARNING: strategy.quant not found — LSTM {symbol} saved to disk only.")
                 except Exception:
                     pass
 
