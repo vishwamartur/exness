@@ -31,15 +31,45 @@
         }
 
         @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
 
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        /* ── Forex session clocks ── */
+        #forex-sessions {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .session-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            min-width: 80px;
+            position: relative;
+            transition: background 0.4s, border-color 0.4s;
+            border: 1px solid rgba(71,85,105,0.35);
+            background: rgba(30,41,59,0.5);
+        }
+        .session-card.open {
+            background: rgba(99,102,241,0.08);
+        }
+        .session-dot {
+            position: absolute;
+            top: 5px; right: 7px;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+        }
+        .session-name { font-size: 10px; font-weight: 600; color: #94a3b8; display: flex; gap: 4px; }
+        .session-time { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+        .session-badge { font-size: 9px; font-weight: 700; letter-spacing: 1px; padding: 1px 5px; border-radius: 4px; }
+        .session-countdown { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #475569; }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; box-shadow: 0 0 5px currentColor; }
+            50%       { opacity: .4; box-shadow: 0 0 10px currentColor; }
         }
     </style>
 </head>
@@ -52,6 +82,9 @@
             <h1 class="font-bold text-lg tracking-tight">Trading<span class="text-indigo-400">Agents</span> v2.2</h1>
         </div>
         <div class="flex items-center gap-4">
+            <!-- Forex Session Clocks -->
+            <div id="forex-sessions"></div>
+
             <div id="status" class="flex items-center gap-2 text-sm text-slate-400">
                 <span class="w-2 h-2 rounded-full bg-red-500" id="status-dot"></span>
                 <span id="status-text">Disconnected</span>
@@ -116,6 +149,72 @@
 
     <script>
         lucide.createIcons();
+
+        /* ────────────────────────────────────────────────────
+         *  Forex Market Session Clocks
+         * ────────────────────────────────────────────────────*/
+        const SESSIONS = [
+            { name:'Sydney',   flag:'🇦🇺', tz:'Australia/Sydney',  openUTC:21, closeUTC:6,  accent:'#60a5fa' },
+            { name:'Tokyo',    flag:'🇯🇵', tz:'Asia/Tokyo',        openUTC:0,  closeUTC:9,  accent:'#f87171' },
+            { name:'London',   flag:'🇬🇧', tz:'Europe/London',     openUTC:7,  closeUTC:16, accent:'#a78bfa' },
+            { name:'New York', flag:'🇺🇸', tz:'America/New_York',  openUTC:12, closeUTC:21, accent:'#34d399' },
+        ];
+
+        function sessionIsOpen(now, openH, closeH) {
+            const h = now.getUTCHours() + now.getUTCMinutes()/60;
+            return openH < closeH ? (h >= openH && h < closeH) : (h >= openH || h < closeH);
+        }
+
+        function secsUntilHour(now, targetH) {
+            const nowSecs = now.getUTCHours()*3600 + now.getUTCMinutes()*60 + now.getUTCSeconds();
+            let diff = targetH*3600 - nowSecs;
+            return diff < 0 ? diff + 86400 : diff;
+        }
+
+        function fmtCountdown(s) {
+            if (s <= 0) return '—';
+            const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function localTime(date, tz) {
+            return date.toLocaleTimeString('en-US', { timeZone: tz, hour:'2-digit', minute:'2-digit', hour12:false });
+        }
+
+        function renderSessions() {
+            const now = new Date();
+            const container = document.getElementById('forex-sessions');
+            container.innerHTML = '';
+
+            SESSIONS.forEach(s => {
+                const open = sessionIsOpen(now, s.openUTC, s.closeUTC);
+                const secsLeft = open ? secsUntilHour(now, s.closeUTC) : secsUntilHour(now, s.openUTC);
+                const preOpen = !open && secsLeft <= 1800;
+
+                const badge = open ? 'OPEN' : (preOpen ? 'PRE' : 'CLOSED');
+                const badgeColor = open ? '#10b981' : (preOpen ? '#f59e0b' : '#475569');
+                const countLabel = open ? `closes ${fmtCountdown(secsLeft)}` : `opens ${fmtCountdown(secsLeft)}`;
+
+                const card = document.createElement('div');
+                card.className = 'session-card' + (open ? ' open' : '');
+                card.style.borderColor = open ? s.accent + '55' : 'rgba(71,85,105,0.35)';
+                card.style.background  = open ? s.accent + '18' : 'rgba(30,41,59,0.5)';
+
+                card.innerHTML = `
+                    ${open ? `<span class="session-dot" style="background:${s.accent};color:${s.accent};animation:pulse-dot 1.5s ease-in-out infinite;"></span>` : ''}
+                    <div class="session-name" style="color:${open ? '#e2e8f0':'#64748b'}">
+                        <span>${s.flag}</span><span>${s.name}</span>
+                    </div>
+                    <div class="session-time" style="color:${open ? s.accent : '#475569'}">${localTime(now, s.tz)}</div>
+                    <div class="session-badge" style="background:${badgeColor}25;color:${badgeColor};border:1px solid ${badgeColor}60">${badge}</div>
+                    <div class="session-countdown" style="color:${preOpen?'#f59e0b':(open?'#94a3b8':'#334155')}">${countLabel}</div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        renderSessions();
+        setInterval(renderSessions, 15000); // refresh every 15s
 
         const logContainer = document.getElementById('log-container');
         const statusDot = document.getElementById('status-dot');

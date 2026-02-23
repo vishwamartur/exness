@@ -182,3 +182,9 @@ body {
   to   { opacity: 1; transform: translateX(0); }
 }
 .slide-in { animation: slideIn .25s ease; }
+
+/* ─── Forex session clock pulse dot ─── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1;  box-shadow: 0 0 4px currentColor; }
+  50%       { opacity: .5; box-shadow: 0 0 10px currentColor; }
+}

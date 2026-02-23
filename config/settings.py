@@ -198,3 +198,19 @@ LSTM_SEQ_LENGTH = 60
 # ─── Telegram Notifications ───────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ─── Financial Modeling Prep (FMP) API — Free Tier (250 calls/day) ───────────────────────────
+# Working endpoints on this plan: api/v3/fx (live FX rates)
+# Calendar/news endpoints require Starter plan (402 on Basic).
+FMP_API_KEY           = os.getenv("FMP_API_KEY", "")
+FMP_MAX_DAILY_CALLS   = int(os.getenv("FMP_MAX_DAILY_CALLS", 50))    # hard safety cap
+FMP_FX_CACHE_MINUTES  = int(os.getenv("FMP_FX_CACHE_MINUTES", 120))  # 2-hour cache for FX rates
+
+# ─── MQL5 Economic Calendar (MT5 built-in, via CalendarExport.mq5 EA) ────────
+# Free, no rate limits. Requires CalendarExport.mq5 EA running in MT5.
+# The EA writes calendar_events.json to MT5's Files folder every 60 seconds.
+# Python auto-detects the path; leave MT5_CALENDAR_FILE blank for auto-detect.
+MT5_CALENDAR_FILE        = os.getenv("MT5_CALENDAR_FILE", "")         # blank = auto-detect
+MT5_CALENDAR_CACHE_SEC   = int(os.getenv("MT5_CALENDAR_CACHE_SEC",  55))  # in-memory TTL (s)
+MT5_CALENDAR_HOURS_AHEAD = int(os.getenv("MT5_CALENDAR_HOURS_AHEAD", 24)) # look-ahead window
+MT5_CALENDAR_MIN_IMPACT  = int(os.getenv("MT5_CALENDAR_MIN_IMPACT",   3)) # 1=low 2=med 3=high

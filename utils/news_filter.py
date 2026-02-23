@@ -1,18 +1,24 @@
 """
-News Event Filter — Avoids trading during high-impact economic events.
+News Event Filter -- Avoids trading during high-impact economic events.
 
-Uses investing.com/forex-factory-style calendar data.
-Since we can't reliably scrape calendars in real-time, this uses a
-schedule-based approach for known recurring high-impact events.
+Data sources (evaluated in order, best -> fallback):
+  1. MQL5 Economic Calendar  -- MT5 built-in calendar via CalendarExport.mq5 EA
+  2. Forex Factory JSON feed -- this-week calendar from nfs.faireconomy.media
+  3. Hardcoded schedule      -- known recurring events (NFP, FOMC, CPI, etc.)
 
-Key events to avoid (±30 minutes around release):
+MQL5 Calendar setup:
+  - Compile mql5/CalendarExport.mq5 in MetaEditor
+  - Attach to any chart (e.g. EURUSD M1) in MT5
+  - It writes calendar_events.json to MT5's Files folder every 60 seconds
+  - Python auto-detects the file path via utils.mt5_calendar._find_calendar_file()
+  - If MT5 is closed, falls back to sources 2 & 3 automatically
+
+Key events to avoid (+-15-45 min buffer around release):
 - NFP (Non-Farm Payrolls): First Friday of each month, 13:30 UTC
 - FOMC Rate Decision: ~8 times/year, 19:00 UTC
 - CPI (Consumer Price Index): Mid-month, 13:30 UTC
 - ECB Rate Decision: ~8 times/year, 12:45 UTC
 - BOE Rate Decision: ~8 times/year, 12:00 UTC
-
-Also, optional full-disable for Asian session low-liquidity periods.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -158,18 +164,41 @@ def _fetch_forex_factory_events():
 
 def is_news_blackout(symbol, now_utc=None):
     """
-    Returns (True, event_name) if we should avoid trading this symbol
+    Returns (True, event_name) if trading this symbol should be avoided
     due to upcoming or ongoing high-impact news.
-    Checks live Forex Factory feed first, then falls back to hardcoded schedule.
+
+    Check order:
+      1. MQL5 Calendar (MT5 built-in, via CalendarExport.mq5 shared JSON)
+      2. Forex Factory JSON feed (live, this-week calendar)
+      3. Hardcoded schedule (always-available fallback)
     """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
 
-    # ── Live Feed Check ──────────────────────────────────────────────────────
     try:
         from config import settings
         pre  = timedelta(minutes=getattr(settings, 'NEWS_PRE_MINUTES', 15))
         post = timedelta(minutes=getattr(settings, 'NEWS_POST_MINUTES', 15))
+        min_imp = getattr(settings, 'MT5_CALENDAR_MIN_IMPACT', 3)
+    except Exception:
+        pre  = timedelta(minutes=15)
+        post = timedelta(minutes=15)
+        min_imp = 3
+
+    # -- 1. MQL5 Economic Calendar (MT5 terminal native data) ------------------
+    try:
+        from utils.mt5_calendar import get_client as _mt5cal
+        cal = _mt5cal()
+        if cal.is_available:
+            for ev in cal.get_all_events(min_importance=min_imp):
+                if _symbol_has_currency(symbol, ev['currency']):
+                    if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
+                        return True, f"MT5:{ev['name']}"
+    except Exception:
+        pass
+
+    # -- 2. Forex Factory Live Feed --------------------------------------------
+    try:
         for ev in _fetch_forex_factory_events():
             if _symbol_has_currency(symbol, ev['currency']):
                 if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
@@ -177,11 +206,10 @@ def is_news_blackout(symbol, now_utc=None):
     except Exception:
         pass
 
-    # ── Hardcoded Schedule Fallback ───────────────────────────────────────────
+    # -- 3. Hardcoded Schedule Fallback ----------------------------------------
     for window in DAILY_AVOID_WINDOWS:
         start = now_utc.replace(hour=window['start_hour'], minute=window['start_minute'], second=0)
-        end = now_utc.replace(hour=window['end_hour'], minute=window['end_minute'], second=0)
-
+        end   = now_utc.replace(hour=window['end_hour'],   minute=window['end_minute'],   second=0)
         if start <= now_utc <= end:
             for currency in window['affected']:
                 if _symbol_has_currency(symbol, currency):
@@ -196,7 +224,6 @@ def is_news_blackout(symbol, now_utc=None):
         if event['week_of_month'] is not None:
             if _get_week_of_month(now_utc) != event['week_of_month']:
                 continue
-
         event_time = now_utc.replace(hour=event['hour'], minute=event['minute'], second=0)
         buffer = timedelta(minutes=event.get('buffer_minutes', NEWS_BUFFER_MINUTES))
         if (event_time - buffer) <= now_utc <= (event_time + buffer):
@@ -206,17 +233,35 @@ def is_news_blackout(symbol, now_utc=None):
 
 
 def get_active_events(now_utc=None):
-    """Returns list of currently active/upcoming news events (live + hardcoded)."""
+    """Returns list of currently active/upcoming news events (all sources)."""
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
 
     active = []
 
-    # Live feed
     try:
         from config import settings
-        pre  = timedelta(minutes=getattr(settings, 'NEWS_PRE_MINUTES', 15))
-        post = timedelta(minutes=getattr(settings, 'NEWS_POST_MINUTES', 15))
+        pre     = timedelta(minutes=getattr(settings, 'NEWS_PRE_MINUTES', 15))
+        post    = timedelta(minutes=getattr(settings, 'NEWS_POST_MINUTES', 15))
+        min_imp = getattr(settings, 'MT5_CALENDAR_MIN_IMPACT', 3)
+    except Exception:
+        pre     = timedelta(minutes=15)
+        post    = timedelta(minutes=15)
+        min_imp = 3
+
+    # MQL5 Calendar
+    try:
+        from utils.mt5_calendar import get_client as _mt5cal
+        cal = _mt5cal()
+        if cal.is_available:
+            for ev in cal.get_all_events(min_importance=min_imp):
+                if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
+                    active.append(f"MT5:{ev['name']}")
+    except Exception:
+        pass
+
+    # Forex Factory live feed
+    try:
         for ev in _fetch_forex_factory_events():
             if (ev['dt_utc'] - pre) <= now_utc <= (ev['dt_utc'] + post):
                 active.append(f"FF:{ev['name']}")
@@ -236,3 +281,4 @@ def get_active_events(now_utc=None):
             active.append(event['name'])
 
     return active
+

@@ -5,6 +5,7 @@ import ScannerGrid from './components/ScannerGrid'
 import PositionsTable from './components/PositionsTable'
 import TradeFeed from './components/TradeFeed'
 import EventLog from './components/EventLog'
+import ForexSessionClocks from './components/ForexSessionClocks'
 
 const VERSION = '2.2'
 
@@ -50,6 +51,10 @@ export default function App() {
                         <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Exness · M1 Scalping · v{VERSION}</div>
                     </div>
                 </div>
+
+                {/* ── Forex Session Clocks ── */}
+                <ForexSessionClocks now={now} />
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>
                         {utcTime}
