@@ -177,7 +177,11 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", 
 XGB_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "xgboost_v1.pkl")
 USE_XGBOOST = True
 
-# BOS Strategy Settings
+# Commission & Cost Settings
+COMMISSION_PER_LOT = 7.0  # $7 per lot round trip (adjust for your broker)
+MIN_PROFIT_TARGET_PIPS = 5.0  # Minimum 5 pips profit target to cover costs
+MAX_TRADES_PER_HOUR = 3  # Limit trades per hour to reduce commission
+MIN_TRADE_INTERVAL_MINUTES = 15  # Minimum minutes between trades on same pair
 BOS_ENABLE = True
 BOS_MOMENTUM_MULTIPLIER = 1.5
 BOS_SWEEP_LOOKBACK = 20

@@ -248,9 +248,27 @@ class PairAgent:
         tp_dist = atr * settings.ATR_TP_MULTIPLIER + spread_price  # net of spread cost
 
         # Enforce minimum TP > 3x spread (ensures net profit is positive)
-        min_tp = spread_price * 3
-        if tp_dist < min_tp:
-            tp_dist = min_tp
+        min_tp_spread_ratio = getattr(settings, 'MIN_TP_SPREAD_RATIO', 3.0)
+        if spread_price > 0 and tp_dist < spread_price * min_tp_spread_ratio:
+            return None, f"TP too small vs spread ({tp_dist:.5f} < {spread_price * min_tp_spread_ratio:.5f})"
+        
+        # Commission-aware minimum profit check
+        # Estimate commission cost and ensure TP covers it
+        commission_per_lot = getattr(settings, 'COMMISSION_PER_LOT', 7.0)
+        # For 0.01 lot, commission is ~$0.07, need at least 5-7 pips to cover
+        min_profit_pips = getattr(settings, 'MIN_PROFIT_TARGET_PIPS', 5.0)
+        
+        # Convert pips to price distance
+        if 'JPY' in self.symbol:
+            pip_value = 0.01
+        elif self.symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
+            pip_value = 1.0  # Crypto uses whole numbers
+        else:
+            pip_value = 0.0001
+        
+        min_profit_distance = min_profit_pips * pip_value
+        if tp_dist < min_profit_distance:
+            return None, f"TP too small for commission ({tp_dist:.5f} < {min_profit_distance:.5f} = {min_profit_pips} pips)"
         
         # Enforce Min Risk:Reward
         if sl_dist > 0:
