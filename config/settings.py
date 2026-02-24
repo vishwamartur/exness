@@ -60,7 +60,11 @@ SYMBOLS_CRYPTO = []
 SYMBOLS_COMMODITIES = []
 
 
-TIMEFRAME = "M1"  # Hardcoded for Scalping (User Request)
+# TREND TRADING CONFIGURATION
+# ============================
+# Changed from M1 scalping to H1 trend trading for better profitability
+
+TIMEFRAME = os.getenv("TIMEFRAME", "H1")  # H1 for trend trading (was M1)
 print(f"[SETTINGS] TIMEFRAME set to: {TIMEFRAME}")
 LOT_SIZE = float(os.getenv("LOT_SIZE", 0.10))  # Bulk sizing baseline
 DEVIATION = int(os.getenv("DEVIATION", 20))
@@ -70,15 +74,15 @@ LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 RISK_PERCENT = float(os.getenv("RISK_PERCENT", 2.0))       # Risk 2% of account per trade
 MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 5.0))  # Max risk for A+ setups (confluence >= 5)
 
-# ATR-Based Dynamic SL/TP (replaces fixed pips)
-ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))  # SL = 1.5x ATR
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.5))  # TP = 3.5x ATR (Higher Reward)
+# ATR-Based Dynamic SL/TP for TREND TRADING (wider for bigger moves)
+ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 2.5))   # Wider SL (was 1.5)
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 8.0))   # Much wider TP (was 4.0)
 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # AGGRESSIVE: 2 confluences (Was 3)
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 3))     # AGGRESSIVE: Sureshot at 3 (Was 5)
 RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.50))   # AGGRESSIVE: 50% Confidence (Was 0.65)
-MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.5)) # Relaxed 1:1.5 R:R
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 3.0)) # 1:3 R:R for trend trading
 
 # ─── Kelly Criterion Position Sizing ─────────────────────────────────────
 USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Criterion
@@ -91,12 +95,18 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit mu
 
 
 # ─── Trade Management ────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 1 minute between trades (reduced from 5 min)
-RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))  # Scale up for A+ setups
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 15))     # Increased for more trading opportunities
-MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0)) # Stop trading if daily loss > $50
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
+# TREND TRADING MODE - Hold positions for hours/days to capture full trends
+TIMEFRAME_HIGHER = "H4"  # Higher timeframe for trend confirmation
+TIMEFRAME_DAILY = "D1"   # Daily for major trend direction
+TREND_TRAILING_ATR_MULT = 3.0   # Trailing stop at 3x ATR
+
+# Trade Frequency (Reduced for trend trading)
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 1800))  # 30 min between trades
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 10))    # Fewer trades
+RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))   # Scale up for A+ setups
+MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
 MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 150.0))  # Commodities (~$0.50 spread on Gold)
