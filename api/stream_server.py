@@ -38,11 +38,28 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
+    def _serialize(self, obj):
+        """Custom JSON serializer for objects not serializable by default."""
+        import pandas as pd
+        import numpy as np
+        
+        if isinstance(obj, pd.Series):
+            return obj.tolist()
+        elif isinstance(obj, pd.DataFrame):
+            return obj.to_dict('records')
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return float(obj)
+        elif hasattr(obj, '__dict__'):
+            return str(obj)
+        return str(obj)
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         # Send current state snapshot on connect
-        await websocket.send_text(json.dumps({"type": "STATE_SNAPSHOT", "data": _state}))
+        await websocket.send_text(json.dumps({"type": "STATE_SNAPSHOT", "data": _state}, default=self._serialize))
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
@@ -51,7 +68,7 @@ class ConnectionManager:
     async def broadcast(self, message: dict):
         if not self.active_connections:
             return
-        json_msg = json.dumps(message, default=str)
+        json_msg = json.dumps(message, default=self._serialize)
         dead = []
         for ws in self.active_connections:
             try:
@@ -169,7 +186,7 @@ def start_server(host="0.0.0.0", base_port=8000):
     global _server_thread
     _server_thread = threading.Thread(target=run, args=(port,), daemon=True)
     _server_thread.start()
-    print(f"[API] Stream server → http://{host}:{port}  ws://{host}:{port}/ws")
+    print(f"[API] Stream server -> http://{host}:{port}  ws://{host}:{port}/ws")
     return port
 
 

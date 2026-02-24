@@ -8,9 +8,11 @@ from config import settings
 from utils.async_utils import run_in_executor
 from market_data import loader
 from utils.trade_journal import TradeJournal
+from utils.trade_journal import TradeJournal
 from strategy.bos_strategy import BOSStrategy
 from utils.news_filter import is_news_blackout
-from utils.telegram_notifier import get_notifier as _tg
+from analysis.sentiment_analyzer import get_sentiment_analyzer
+from analysis.pattern_memory import get_pattern_memory
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ class PairAgent:
         self.analyst = analyst_agent
         self.risk_manager = risk_manager
         self.journal = TradeJournal()
+        self.sentiment_analyzer = get_sentiment_analyzer()
+        self.pattern_memory = get_pattern_memory()  # RAG for historical patterns
         
         # State
         self.is_active = True
@@ -40,10 +44,8 @@ class PairAgent:
         self.regime = "UNKNOWN"
         self.last_atr_time = 0
         self.latest_atr = 0.0
-
-        # Track open tickets to detect closes for Telegram alerts
-        self._tracked_positions: Dict[int, Dict] = {}  # {ticket: {direction, entry_price}}
-
+        self.last_pattern_id = None  # Track last stored pattern for outcome update
+        
         # Performance Thresholds (Self-Correction)
         self.max_consecutive_losses = 3
 
@@ -69,7 +71,7 @@ class PairAgent:
         
         if self.consecutive_losses >= self.max_consecutive_losses:
              self.is_active = False
-             print(f"[{self.symbol}] ⚠️ Agent restored in PAUSED state (Circuit Breaker).")
+             print(f"[{self.symbol}] WARN: Agent restored in PAUSED state (Circuit Breaker).")
 
     async def scan(self) -> Tuple[Optional[Dict[str, Any]], str]:
         """
@@ -170,7 +172,12 @@ class PairAgent:
         if getattr(settings, 'BOS_ENABLE', False):
              bos_res = self.bos.analyze(df_scan)
         
-        # 4. Construct Candidate using ML or BOS
+        # 4. Pattern Recognition Analysis
+        from analysis.pattern_recognizer import get_pattern_recognizer
+        pattern_recognizer = get_pattern_recognizer()
+        pattern_analysis = pattern_recognizer.analyze(df_scan)
+        
+        # 5. Construct Candidate using ML or BOS
         # Filter: Minimum Score
         score = q_res.get('score', 0)
         
@@ -195,13 +202,27 @@ class PairAgent:
                  
         # Note: candidate['ml_prob'] assignment removed here, will be set during creation below
              
-        # Regime Filter (Basic)
-        signal = q_res.get('signal', 'NEUTRAL')
-        if signal == "BUY" and "BEARISH" in regime:
-             # Allow if score is high (Counter-trend)?
-             if score < 7: return None, f"Regime Conflict ({regime})"
-        if signal == "SELL" and "BULLISH" in regime:
-             if score < 7: return None, f"Regime Conflict ({regime})"
+        # AI-Powered Market Regime Filter (Enhanced)
+        signal = q_res.get('direction', 'NEUTRAL')
+        
+        # Get detailed regime classification
+        from analysis.regime import RegimeDetector
+        regime_detector = RegimeDetector()
+        regime_type, regime_details = regime_detector.get_regime(df_scan)
+        
+        # Skip trades in bad regimes (RANGING, VOLATILE_HIGH)
+        if not regime_detector.is_tradeable_regime(regime_type):
+            return None, f"Bad Regime: {regime_type} - Skip trading"
+        
+        # Score regime alignment with trade direction
+        regime_score, regime_reason = regime_detector.get_regime_score(regime_type, signal)
+        
+        # Require minimum regime score for the direction
+        if regime_score < 5:
+            return None, f"Weak Regime ({regime_type}: {regime_score}/10) - {regime_reason}"
+        
+        # Log regime info for debugging
+        print(f"[{self.symbol}] Regime: {regime_type} | Score: {regime_score}/10 | {regime_reason}")
 
         # Construct
         atr = q_res['features'].get('atr', 0)
@@ -235,6 +256,45 @@ class PairAgent:
             if rr_ratio < settings.MIN_RISK_REWARD_RATIO:
                 return None, f"Low R:R ({rr_ratio:.2f} < {settings.MIN_RISK_REWARD_RATIO})"
         
+        # Pattern Recognition Filter
+        should_trade_pattern, pattern_confidence = pattern_recognizer.get_pattern_signal(
+            pattern_analysis, signal
+        )
+        
+        if not should_trade_pattern:
+            return None, f"Pattern Conflict - {pattern_analysis.get('count', 0)} patterns detected against trade"
+        
+        # Boost score if patterns support the trade
+        if pattern_confidence > 0.6:
+            score = min(6, score + 1)  # Boost score by 1 (max 6)
+            print(f"[{self.symbol}] Pattern boost: +1 score (confidence: {pattern_confidence:.2f})")
+        
+        # News Sentiment Analysis
+        sentiment = self.sentiment_analyzer.get_sentiment_recommendation({'score': 0})  # Placeholder
+        # In async context, we'd use: sentiment = await self.sentiment_analyzer.get_sentiment(self.symbol)
+        
+        # Check sentiment alignment
+        sentiment_aligned = self.sentiment_analyzer.should_trade_with_sentiment(
+            self.symbol, signal, {'score': 0, 'confidence': 0}  # Placeholder - integrate real sentiment
+        )
+        
+        if not sentiment_aligned:
+            return None, f"Sentiment Conflict - News sentiment against {signal}"
+        
+        # RAG: Retrieve similar historical patterns
+        rag_context = self.pattern_memory.get_pattern_context(df_scan, self.symbol, signal)
+        
+        # Check RAG recommendation
+        if rag_context['recommendation'] == 'AVOID' and rag_context['historical_win_rate'] < 0.25:
+            return None, f"RAG Block - Similar patterns have {rag_context['historical_win_rate']*100:.0f}% win rate"
+        
+        # Boost/reduce ML probability based on RAG
+        rag_confidence_boost = rag_context.get('confidence_boost', 1.0)
+        prob = min(0.95, prob * rag_confidence_boost)  # Apply RAG confidence boost
+        
+        if rag_context['recommendation'] in ['PROCEED', 'NEUTRAL']:
+            print(f"[{self.symbol}] RAG: {rag_context['context_text']}")
+        
         candidate = {
             'symbol': self.symbol,
             'direction': signal,
@@ -242,9 +302,17 @@ class PairAgent:
             'entry_price': 0,          # Filled at execution
             'entry_type': 'MARKET',    # Default; BOS overrides to LIMIT
             'ensemble_score': q_res.get('ensemble_score', 0),
+            'agreement_count': q_res.get('agreement_count', 0),
+            'model_votes': q_res.get('model_votes', {}),
             'ml_prob': prob,
-            'ai_signal': q_res.get('ai_signal', 0),  # Fix: was missing, caused KeyError in journal
             'regime': regime,
+            'regime_type': regime_type,
+            'regime_score': regime_score,
+            'pattern_analysis': pattern_analysis,
+            'pattern_confidence': pattern_confidence,
+            'sentiment': sentiment,
+            'rag_context': rag_context,
+            'rag_win_rate': rag_context.get('historical_win_rate', 0.5),
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
             'scaling_factor': 1.0,
@@ -303,7 +371,6 @@ class PairAgent:
         Active trade management:
         1. Standard Risk Management (Trailing/BE/Partial) via RiskManager.
         2. Agent-Specific Logic (e.g. Regime exit).
-        3. Telegram trade-closed alert when a tracked position disappears.
         """
         # We need the client to get positions and execute actions.
         # Assuming risk_manager has the client.
@@ -311,37 +378,7 @@ class PairAgent:
         if not client: return
 
         positions = client.get_positions(self.symbol)
-
-        # ── Detect closed positions and fire Telegram alert ──────────────
-        current_tickets = {p.ticket for p in positions} if positions else set()
-        for ticket, meta in list(self._tracked_positions.items()):
-            if ticket not in current_tickets:
-                # Position closed — fetch P&L from MT5 history
-                try:
-                    from datetime import timedelta
-                    now = datetime.now(timezone.utc)
-                    deals = client.get_history_deals(now - timedelta(hours=4), now)
-                    profit = 0.0
-                    if deals:
-                        for d in deals:
-                            if hasattr(d, 'position_id') and d.position_id == ticket:
-                                profit += d.profit + d.commission + d.swap
-                    _tg().trade_closed(self.symbol, meta.get('direction', '?'), profit)
-                except Exception as _e:
-                    logger.warning(f"[{self.symbol}] trade_closed alert error: {_e}")
-                del self._tracked_positions[ticket]
-
-        # Register any new positions we haven't seen yet
-        if positions:
-            for p in positions:
-                if p.ticket not in self._tracked_positions:
-                    self._tracked_positions[p.ticket] = {
-                        'direction': 'BUY' if p.type == 0 else 'SELL',
-                        'entry_price': p.price_open,
-                    }
-
-        if not positions:
-            return
+        if not positions: return
 
         # Get Data for decision making
         tick = mt5.symbol_info_tick(self.symbol)
@@ -377,10 +414,10 @@ class PairAgent:
             try:
                 if act['type'] == 'MODIFY':
                     client.modify_position(act['ticket'], act['sl'], act['tp'])
-                    print(f"[{self.symbol}] 🛡️ Agent: {act['reason']} -> SL {act['sl']:.5f}")
+                    print(f"[{self.symbol}] Agent: {act['reason']} -> SL {act['sl']:.5f}")
                 elif act['type'] == 'PARTIAL':
                     client.partial_close(act['ticket'], act['fraction'])
-                    print(f"[{self.symbol}] 💰 Agent: {act['reason']} -> Partial Close")
+                    print(f"[{self.symbol}] Agent: {act['reason']} -> Partial Close")
             except Exception as e:
                 logger.error(f"[{self.symbol}] Management Action Failed: {e}")
 
@@ -403,7 +440,7 @@ class PairAgent:
                     # Close trade
                     try:
                         client.close_position(pos.ticket)
-                        print(f"[{self.symbol}] 🧠 Agent Logic: Closing due to {exit_reason}")
+                        print(f"[{self.symbol}] Agent Logic: Closing due to {exit_reason}")
                         # Log to journal? The standard journal logs exit on detection or we can force log
                         # The journal updates on the next scan/check usually, or we can explicit log here
                     except Exception as e:
@@ -424,13 +461,13 @@ class PairAgent:
             
         # Circuit Breaker Logic
         if self.consecutive_losses >= self.max_consecutive_losses:
-            print(f"[{self.symbol}] ⛔ PAUSED due to {self.consecutive_losses} consecutive losses. P&L: {self.total_pnl:.2f}")
+            print(f"[{self.symbol}] PAUSED due to {self.consecutive_losses} consecutive losses. P&L: {self.total_pnl:.2f}")
             self.is_active = False # Require manual intervention or timer to reset?
 
     def reset_circuit_breaker(self):
         self.is_active = True
         self.consecutive_losses = 0
-        print(f"[{self.symbol}] 🟢 Circuit breaker reset.")
+        print(f"[{self.symbol}] Circuit breaker reset.")
 
     def _check_retail_viability(self, candidate):
         """
@@ -449,7 +486,7 @@ class PairAgent:
                 ratio = spread_pips / sl_dist
                 max_ratio = getattr(settings, 'BOS_MAX_SPREAD_RATIO', 0.15)
                 if ratio > max_ratio:
-                    print(f"[{self.symbol}] 🛑 Retail Filter: Spread {spread_pips:.5f} is {ratio:.1%} of SL. Max {max_ratio:.1%}")
+                    print(f"[{self.symbol}] Retail Filter: Spread {spread_pips:.5f} is {ratio:.1%} of SL. Max {max_ratio:.1%}")
                     return False
         
         # 2. Hunting Hours Check
@@ -457,10 +494,42 @@ class PairAgent:
         current_hour = datetime.now(timezone.utc).hour
         
         if hunting_hours and current_hour not in hunting_hours:
-             print(f"[{self.symbol}] 🛑 Retail Filter: Off-hours ({current_hour}:00). Hunting: {hunting_hours}")
+             print(f"[{self.symbol}] Retail Filter: Off-hours ({current_hour}:00). Hunting: {hunting_hours}")
              return False
              
         return True
+
+    def store_trade_pattern(self, df, direction: str, context: str = None) -> int:
+        """
+        Store current market pattern when trade is opened.
+        Called by execution layer after trade is submitted.
+        
+        Returns pattern_id for later outcome update.
+        """
+        pattern_id = self.pattern_memory.store_pattern(
+            symbol=self.symbol,
+            df=df,
+            direction=direction,
+            outcome=None,  # Will be updated when trade closes
+            pnl=0,
+            context=context
+        )
+        self.last_pattern_id = pattern_id
+        return pattern_id
+    
+    def update_pattern_outcome(self, pattern_id: int, outcome: str, pnl: float):
+        """
+        Update pattern outcome when trade closes.
+        Called by execution layer after trade result is known.
+        
+        Args:
+            pattern_id: The pattern ID returned by store_trade_pattern
+            outcome: 'WIN' or 'LOSS'
+            pnl: Actual profit/loss
+        """
+        if pattern_id and pattern_id > 0:
+            self.pattern_memory.update_outcome(pattern_id, outcome, pnl)
+            print(f"[{self.symbol}] RAG: Updated pattern {pattern_id} -> {outcome} (${pnl:.2f})")
 
 def projected_time_now():
     return datetime.now(timezone.utc).timestamp()

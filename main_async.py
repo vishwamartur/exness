@@ -1,9 +1,3 @@
-# ╔══════════════════════════════════════════════════════════════╗
-# ║  DEPRECATED — use main.py as the canonical entry point.     ║
-# ║  This file kept for reference only (has auto-dashboard        ║
-# ║  launch via subprocess + webbrowser).                        ║
-# ║  Run: python main.py                                         ║
-# ╚══════════════════════════════════════════════════════════════╝
 
 import asyncio
 import os

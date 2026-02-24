@@ -18,23 +18,18 @@ SYMBOL = os.getenv("SYMBOL", "EURUSD")
 # Base names — the bot auto-detects the correct suffix for your account
 # (e.g., EURUSD, EURUSDm, EURUSDc depending on Standard/Cent account)
 
-# Majors — always on (tightest spreads, deepest liquidity)
+# Pruned for Expectancy Improvement (Focus on majors/crypto)
+# Temporarily commenting out negative expectancy pairs provided by user analysis
 SYMBOLS_FOREX_MAJORS_BASE = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+    "EURUSD", "GBPUSD", "USDJPY", # "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
 ]
 
-# Minors — Tier 1 (re-enabled): high liquidity EUR/GBP crosses + JPY majors
-# Spread gate in RiskManager (MAX_SPREAD_PIPS=3.0) auto-blocks during low-liquidity windows
 SYMBOLS_FOREX_MINORS_BASE = [
-    # ── EUR crosses ──────────────────────────────────────────────────────
-    "EURGBP", "EURJPY", "EURAUD", "EURCAD", "EURCHF",
-    # ── GBP crosses ──────────────────────────────────────────────────────
-    "GBPJPY", "GBPAUD", "GBPCAD", "GBPCHF",
-    # ── JPY commodity-currency crosses ───────────────────────────────────
-    "AUDJPY", "CADJPY",
-    # ── Watchlist (low volume / exotic — enable after expectancy confirmed) ─
-    # "EURNZD", "GBPNZD", "AUDCAD", "AUDCHF", "AUDNZD",
-    # "NZDJPY", "NZDCAD", "NZDCHF", "CADCHF", "CHFJPY",
+    # "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD", "EURCHF", "EURNZD",
+    # "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
+    # "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD",
+    # "NZDJPY", "NZDCAD", "NZDCHF",
+    # "CADJPY", "CADCHF", "CHFJPY",
 ]
 
 SYMBOLS_CRYPTO_BASE = [
@@ -114,7 +109,7 @@ VOLATILITY_ATR_MIN_COMMODITY = float(os.getenv("VOLATILITY_ATR_MIN_COMMODITY", 0
 
 # ─── Strict Scalp Session Windows (UTC) ──────────────────────────────────
 # ONLY trade during London Open and NY Open for tight spreads + volume
-SCALP_SESSION_FILTER = os.getenv("SCALP_SESSION_FILTER", "True").lower() == "true"
+SCALP_SESSION_FILTER = os.getenv("SCALP_SESSION_FILTER", "False").lower() == "true"
 SCALP_SESSIONS = [
     {"name": "London Open", "start": 7, "end": 10},   # 07:00-10:00 UTC
     {"name": "NY Open",     "start": 13, "end": 16},  # 13:00-16:00 UTC
@@ -171,8 +166,10 @@ TRADE_SESSIONS = {
 }
 SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"
 
-# ─── Data Settings ───────────────────────────────────────────────────────
-HISTORY_BARS = 10000
+# --- Data Settings -----------------------------------------------------------
+# 10 years of M15 data: 10 * 252 days * 96 bars/day = ~242,000 bars
+HISTORY_BARS = 250000  # 10 years of M15 data
+HISTORY_BARS_M1 = 500000  # ~1 year of M1 data for scalping
 TRAIN_TEST_SPLIT = 0.8
 
 # ─── Model Settings ─────────────────────────────────────────────────────
@@ -203,19 +200,3 @@ LSTM_SEQ_LENGTH = 60
 # ─── Telegram Notifications ───────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
-
-# ─── Financial Modeling Prep (FMP) API — Free Tier (250 calls/day) ───────────────────────────
-# Working endpoints on this plan: api/v3/fx (live FX rates)
-# Calendar/news endpoints require Starter plan (402 on Basic).
-FMP_API_KEY           = os.getenv("FMP_API_KEY", "")
-FMP_MAX_DAILY_CALLS   = int(os.getenv("FMP_MAX_DAILY_CALLS", 50))    # hard safety cap
-FMP_FX_CACHE_MINUTES  = int(os.getenv("FMP_FX_CACHE_MINUTES", 120))  # 2-hour cache for FX rates
-
-# ─── MQL5 Economic Calendar (MT5 built-in, via CalendarExport.mq5 EA) ────────
-# Free, no rate limits. Requires CalendarExport.mq5 EA running in MT5.
-# The EA writes calendar_events.json to MT5's Files folder every 60 seconds.
-# Python auto-detects the path; leave MT5_CALENDAR_FILE blank for auto-detect.
-MT5_CALENDAR_FILE        = os.getenv("MT5_CALENDAR_FILE", "")         # blank = auto-detect
-MT5_CALENDAR_CACHE_SEC   = int(os.getenv("MT5_CALENDAR_CACHE_SEC",  55))  # in-memory TTL (s)
-MT5_CALENDAR_HOURS_AHEAD = int(os.getenv("MT5_CALENDAR_HOURS_AHEAD", 24)) # look-ahead window
-MT5_CALENDAR_MIN_IMPACT  = int(os.getenv("MT5_CALENDAR_MIN_IMPACT",   3)) # 1=low 2=med 3=high

@@ -249,9 +249,15 @@ class InstitutionalStrategy:
                     # Force ASCII for Windows Console
                     safe_det = det.encode('ascii', 'ignore').decode('ascii') 
                     safe_sym = c['symbol'].encode('ascii', 'ignore').decode('ascii')
-                    print(f"    {safe_sym:>10} | {c['direction']:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {safe_det}")
+                    safe_dir = str(c['direction']).encode('ascii', 'ignore').decode('ascii')
+                    print(f"    {safe_sym:>10} | {safe_dir:>4} | {c['score']} | {c['ensemble_score']:.2f} | {c['ml_prob']:.2f} | {safe_det}")
                 except Exception as e:
-                    print(f"    {c['symbol']:>10} | {c['direction']:>4} | {c['score']} | [Print Error]")
+                    try:
+                        safe_sym = str(c.get('symbol', 'UNKNOWN')).encode('ascii', 'ignore').decode('ascii')
+                        safe_dir = str(c.get('direction', 'UNKNOWN')).encode('ascii', 'ignore').decode('ascii')
+                        print(f"    {safe_sym:>10} | {safe_dir:>4} | {c.get('score', 0)} | [Print Error]")
+                    except:
+                        print(f"    [Print Error]")
             
             best = candidates[0]
 
@@ -371,42 +377,23 @@ class InstitutionalStrategy:
         # Sizing
         lot = self.risk_manager.calculate_position_size(symbol, sl_dist, score, setup['scaling_factor'])
         
-        # ── LIMIT order path (BOS setups) ───────────────────────────────────
-        entry_type = setup.get('entry_type', 'MARKET')
-        limit_price = setup.get('limit_price', None)
-
-        if entry_type == 'LIMIT' and limit_price is not None:
-            # Compute SL/TP from the limit price, not the current tick
-            if direction == 'BUY':
-                sl  = limit_price - sl_dist
-                tp  = limit_price + tp_dist
-                cmd = mt5.ORDER_TYPE_BUY   # place_order promotes to BUY_LIMIT when limit_price set
-            else:
-                sl  = limit_price + sl_dist
-                tp  = limit_price - tp_dist
-                cmd = mt5.ORDER_TYPE_SELL  # place_order promotes to SELL_LIMIT when limit_price set
-            price = limit_price
-            print(f"[{symbol}] EXECUTE {direction} LIMIT @ {limit_price:.5f} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f}")
-            res = self.client.place_order(cmd, symbol, lot, sl, tp, limit_price=limit_price)
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick: return
+        
+        if direction == 'BUY':
+            sl = tick.ask - sl_dist
+            tp = tick.ask + tp_dist
+            cmd = mt5.ORDER_TYPE_BUY
+            price = tick.ask
         else:
-            # Standard MARKET order
-            tick = mt5.symbol_info_tick(symbol)
-            if not tick: return
-
-            if direction == 'BUY':
-                sl  = tick.ask - sl_dist
-                tp  = tick.ask + tp_dist
-                cmd = mt5.ORDER_TYPE_BUY
-                price = tick.ask
-            else:
-                sl  = tick.bid + sl_dist
-                tp  = tick.bid - tp_dist
-                cmd = mt5.ORDER_TYPE_SELL
-                price = tick.bid
-
-            print(f"[{symbol}] EXECUTE {direction} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f}")
-            res = self.client.place_order(cmd, symbol, lot, sl, tp)
-
+            sl = tick.bid + sl_dist
+            tp = tick.bid - tp_dist
+            cmd = mt5.ORDER_TYPE_SELL
+            price = tick.bid
+            
+        print(f"[{symbol}] EXECUTE {direction} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f}")
+        
+        res = self.client.place_order(cmd, symbol, lot, sl, tp)
         if res:
             print(f"[OK] ORDER FILLED: {symbol}")
             # Telegram alert
@@ -422,24 +409,24 @@ class InstitutionalStrategy:
                 })
             self.risk_manager.record_trade(symbol)
             self.last_trade_time[symbol] = time.time()
-
+            
             # Notify Agent
             if symbol in self.agents:
                 self.agents[symbol].on_trade_executed(price, direction)
-
+            
             self.journal.log_entry(
                 ticket=res.order,
-                symbol=symbol,
-                direction=direction,
+                symbol=symbol, 
+                direction=direction, 
                 lot_size=lot,
-                entry_price=price,
-                sl_price=sl,
+                entry_price=price, 
+                sl_price=sl, 
                 tp_price=tp,
-                confluence_score=score,
-                confluence_details=setup['details'],
-                rf_probability=setup['ml_prob'],
-                ai_signal=setup['ai_signal'],
-                asset_class=_get_asset_class(symbol),
+                confluence_score=score, 
+                confluence_details=setup.get('details', {}),
+                rf_probability=setup.get('ml_prob', 0.5), 
+                ai_signal=setup.get('ai_signal', 0),
+                asset_class=_get_asset_class(symbol), 
                 session=self._get_current_session(),
                 researcher_action=setup.get('researcher_action', 'NONE'),
                 researcher_confidence=setup.get('researcher_confidence', 0),
@@ -481,53 +468,32 @@ class InstitutionalStrategy:
         return self.daily_trade_count < settings.MAX_DAILY_TRADES
 
     def _print_scan_summary(self, scan_status):
-        """Prints a grouped, colour-coded scan summary."""
-        # Group by reason category
-        candidates, blocks, skips, errors = [], [], [], []
+        """Prints a grouped summary of scan results."""
+        # Simple summary for brevity
+        pass 
+        # (You can re-implement the detailed summary if desired, but for now 
+        # let's keep the scanner output clean or delegate to per-agent logs)
+        print(f"\n--- Scan Summary ---")
+        
+        # Group by reason
+        grouped = {}
         for sym, reason in scan_status.items():
-            r = reason.upper()
-            if "CANDIDATE" in r or reason == "OK":
-                candidates.append((sym, reason))
-            elif "ERROR" in r:
-                errors.append((sym, reason))
-            elif any(k in r for k in ("BLOCK", "LIMIT", "SPREAD", "KILL", "CIRCUIT")):
-                blocks.append((sym, reason))
-            else:
-                skips.append((sym, reason))
-
-        lines = [f"\n{'='*60}", f"  SCAN SUMMARY  ({len(scan_status)} symbols)"]
-
-        if candidates:
-            lines.append(f"  [>>] CANDIDATES ({len(candidates)}):")
-            for sym, reason in candidates:
-                lines.append(f"       {sym:<14} {reason}")
-
-        if errors:
-            lines.append(f"  [!!] ERRORS ({len(errors)}):")
-            for sym, reason in errors[:5]:   # cap at 5 to avoid clutter
-                lines.append(f"       {sym:<14} {reason[:60]}")
-
-        if blocks:
-            # Group identical reasons to save vertical space
-            by_reason: dict = {}
-            for sym, reason in blocks:
-                by_reason.setdefault(reason, []).append(sym)
-            lines.append(f"  [--] BLOCKED ({len(blocks)}):")
-            for reason, syms in by_reason.items():
-                tag = ', '.join(syms) if len(syms) <= 4 else f"{len(syms)} symbols"
-                lines.append(f"       {reason:<28} {tag}")
-
-        if skips:
-            by_reason: dict = {}
-            for sym, reason in skips:
-                by_reason.setdefault(reason, []).append(sym)
-            lines.append(f"  [  ] SKIPPED ({len(skips)}):")
-            for reason, syms in by_reason.items():
-                tag = ', '.join(syms) if len(syms) <= 4 else f"{len(syms)} symbols"
-                lines.append(f"       {reason:<28} {tag}")
-
-        lines.append('='*60)
-        print('\n'.join(lines))
+            if reason not in grouped: grouped[reason] = []
+            grouped[reason].append(sym)
+            
+        # Print valid candidates first
+        for reason, syms in grouped.items():
+            if "CANDIDATE" in reason:
+                 print(f"  [OK] {reason:<20}: {', '.join(syms)}")
+        
+        # Print others
+        for reason, syms in grouped.items():
+            if "CANDIDATE" not in reason:
+                if len(syms) > 10:
+                    print(f"  [-]  {reason:<20}: {len(syms)} symbols")
+                else:
+                    print(f"  [-]  {reason:<20}: {', '.join(syms)}")
+        print(f"--------------------\n")
 
     def check_market(self, symbol):
         pass

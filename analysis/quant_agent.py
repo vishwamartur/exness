@@ -127,13 +127,19 @@ class QuantAgent:
         m5 = self._compute_trend(data_dict.get('M5'))
         h4 = self._compute_trend(data_dict.get('H4'))
         
-        # ML Predictions
-        rf_prob, _ = self._get_rf_prediction(df)
-        xgb_prob, _ = self._get_xgb_prediction(df)
+        # ML Predictions (with symbol for multi-pair model)
+        rf_prob, _ = self._get_rf_prediction(df, symbol)
+        xgb_prob, _ = self._get_xgb_prediction(df, symbol)
         ml_prob = (rf_prob + xgb_prob) / 2 if self.xgb_model else rf_prob
         
         # AI Signal
         ai_signal = self._get_ai_signal(symbol, df)
+        
+        # Get LSTM prediction
+        lstm_pred = self._get_lstm_prediction(symbol, df)
+        
+        # Get HF (Chronos/Lag-Llama) prediction
+        hf_pred = self._get_hf_prediction(symbol, df)
         
         # Scoring
         buy_score, buy_details = self._calculate_confluence(symbol, df, "buy", h1, h4, m5)
@@ -143,7 +149,10 @@ class QuantAgent:
         direction = "BUY" if buy_score >= sell_score else "SELL"
         details = buy_details if direction == "BUY" else sell_details
         
-        ensemble = self._ensemble_vote(ml_prob, ai_signal, best_score)
+        # Enhanced Ensemble Voting
+        ensemble_score, agreement_count, model_votes = self._ensemble_vote(
+            ml_prob, ai_signal, best_score, lstm_pred, hf_pred
+        )
         
         return {
             'symbol': symbol,
@@ -152,7 +161,11 @@ class QuantAgent:
             'details': details,
             'ml_prob': ml_prob,
             'ai_signal': ai_signal,
-            'ensemble_score': ensemble,
+            'ensemble_score': ensemble_score,
+            'agreement_count': agreement_count,
+            'model_votes': model_votes,
+            'lstm_pred': lstm_pred,
+            'hf_pred': hf_pred,
             'h4_trend': h4,
             'features': df.iloc[-1], # For quick access
             'data': df # Full history for Regime Detector
@@ -168,53 +181,97 @@ class QuantAgent:
         elif close < sma * 0.999: return -1
         return 0
 
-    def _get_rf_prediction(self, df):
+    def _get_rf_prediction(self, df, symbol=None):
         if self.model is None: return 0.5, 0
         last = df.iloc[-1:]
-        X = self._prepare_X(last)
+        X = self._prepare_X(last, symbol)
         try:
             return self.model.predict_proba(X)[0][1], self.model.predict(X)[0]
         except: return 0.5, 0
         
-    def _get_xgb_prediction(self, df):
+    def _get_xgb_prediction(self, df, symbol=None):
         if self.xgb_model is None: return 0.5, 0
         last = df.iloc[-1:]
-        X = self._prepare_X(last)
+        X = self._prepare_X(last, symbol)
         try:
             return self.xgb_model.predict_proba(X)[0][1], self.xgb_model.predict(X)[0]
         except: return 0.5, 0
 
-    def _prepare_X(self, row):
-        if self.feature_cols:
-            cols = [c for c in self.feature_cols if c in row.columns]
-            if cols: return row[cols]
-        exclude = ['time','open','high','low','close','tick_volume','spread','real_volume','target']
-        return row.drop(columns=[c for c in exclude if c in row.columns], errors='ignore')
-
-    def _get_ai_signal(self, symbol, df):
-        # Implementation of AI combination (kept brief for artifact)
-        # Assuming copied from strategy with minor adjustments
-        signals = []
-        # ... logic ...
-        # Simplified for brevity in this write (I will ensure full logic in act)
-        # Using self.hf_predictor and self.lstm_predictors
+    def _prepare_X(self, row, symbol=None):
+        """
+        Prepare feature matrix for prediction.
+        Adds symbol-specific features if training included them.
+        """
+        # Make a copy to avoid modifying original
+        X = row.copy()
         
-        # 1. Chronos/Lag-Llama
+        # Add symbol features if they were in training
+        if symbol and self.feature_cols:
+            if 'symbol_id' in self.feature_cols and 'symbol_id' not in X.columns:
+                X['symbol_id'] = hash(symbol) % 1000
+            if 'volatility_class' in self.feature_cols and 'volatility_class' not in X.columns:
+                # Calculate volatility class on the fly
+                if 'atr' in X.columns and 'close' in X.columns:
+                    atr_mean = X['atr'].mean() if hasattr(X['atr'], 'mean') else X['atr'].iloc[0]
+                    close_mean = X['close'].mean() if hasattr(X['close'], 'mean') else X['close'].iloc[0]
+                    vol_ratio = atr_mean / close_mean if close_mean > 0 else 0
+                    if vol_ratio < 0.0005:
+                        X['volatility_class'] = 0
+                    elif vol_ratio < 0.001:
+                        X['volatility_class'] = 1
+                    elif vol_ratio < 0.005:
+                        X['volatility_class'] = 2
+                    else:
+                        X['volatility_class'] = 3
+                else:
+                    X['volatility_class'] = 1  # Default medium volatility
+        
+        if self.feature_cols:
+            cols = [c for c in self.feature_cols if c in X.columns]
+            if cols: return X[cols]
+        exclude = ['time','open','high','low','close','tick_volume','spread','real_volume','target']
+        return X.drop(columns=[c for c in exclude if c in X.columns], errors='ignore')
+
+    def _get_lstm_prediction(self, symbol, df):
+        """Get raw LSTM prediction as percentage change."""
+        base = _strip_suffix(symbol)
+        lstm = self.lstm_predictors.get(base) or self.lstm_predictors.get('default')
+        if lstm and 'close' in df.columns:
+            try:
+                pred_price = lstm.predict(df)
+                curr_price = df['close'].iloc[-1]
+                return (pred_price - curr_price) / curr_price  # Return % change
+            except:
+                return None
+        return None
+        
+    def _get_hf_prediction(self, symbol, df):
+        """Get HF model (Chronos/Lag-Llama) prediction as percentage change."""
         if self.hf_predictor and 'close' in df.columns:
             try:
-                recent = torch.tensor(df['close'].values[-60:])
+                recent = torch.tensor(df['close'].values[-60:], dtype=torch.float32)
                 pred = self.hf_predictor.predict(recent.unsqueeze(0), prediction_length=12)
                 curr = df['close'].iloc[-1]
                 fut = pred[0, 5].item()
-                if fut > curr * 1.0003: signals.append(1)
-                elif fut < curr * 0.9997: signals.append(-1)
-                else: signals.append(0)
-            except: pass
+                return (fut - curr) / curr  # Return % change
+            except:
+                return None
+        return None
+
+    def _get_ai_signal(self, symbol, df):
+        """Combined AI signal from all available models."""
+        signals = []
+        
+        # 1. Chronos/Lag-Llama
+        hf_pred = self._get_hf_prediction(symbol, df)
+        if hf_pred is not None:
+            if hf_pred > 0.0003: signals.append(1)
+            elif hf_pred < -0.0003: signals.append(-1)
+            else: signals.append(0)
             
         # 2. LSTM
-        base = _strip_suffix(symbol)
-        lstm = self.lstm_predictors.get(base) or self.lstm_predictors.get('default')
-        if lstm:
+        lstm_pred = self._get_lstm_prediction(symbol, df)
+        if lstm_pred is not None:
             try:
                 if lstm.predict(df) > df['close'].iloc[-1] * 1.0003: signals.append(1)
                 elif lstm.predict(df) < df['close'].iloc[-1] * 0.9997: signals.append(-1)
@@ -225,8 +282,79 @@ class QuantAgent:
         avg = sum(signals)/len(signals)
         return 1 if avg > 0.3 else -1 if avg < -0.3 else 0
 
-    def _ensemble_vote(self, rf, ai, conf):
-        return round(0.3*rf + 0.25*((ai+1)/2) + 0.45*(conf/6.0), 3)
+    def _ensemble_vote(self, rf_prob, ai_signal, confluence_score, lstm_pred=None, hf_pred=None):
+        """
+        Enhanced Ensemble Voting System.
+        Combines multiple AI models with weighted voting.
+        Returns: (ensemble_score, agreement_count, model_votes)
+        """
+        votes = {
+            'rf': {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0},
+            'lstm': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0},
+            'hf': {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0},
+            'ai': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0},
+            'confluence': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0}
+        }
+        
+        # 1. Random Forest / XGBoost Vote
+        if rf_prob > 0.60:
+            votes['rf'] = {'direction': 'BUY', 'weight': 0.25, 'confidence': rf_prob}
+        elif rf_prob < 0.40:
+            votes['rf'] = {'direction': 'SELL', 'weight': 0.25, 'confidence': 1 - rf_prob}
+        else:
+            votes['rf'] = {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0.5}
+            
+        # 2. LSTM Vote (if available)
+        if lstm_pred is not None:
+            if lstm_pred > 0.001:  # Bullish prediction
+                votes['lstm'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
+            elif lstm_pred < -0.001:  # Bearish prediction
+                votes['lstm'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
+            else:
+                votes['lstm'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+                
+        # 3. HF Model Vote (Chronos/Lag-Llama)
+        if hf_pred is not None:
+            if hf_pred > 0.0003:
+                votes['hf'] = {'direction': 'BUY', 'weight': 0.15, 'confidence': 0.7}
+            elif hf_pred < -0.0003:
+                votes['hf'] = {'direction': 'SELL', 'weight': 0.15, 'confidence': 0.7}
+            else:
+                votes['hf'] = {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0.5}
+                
+        # 4. AI Signal Vote (LSTM + HF combined)
+        if ai_signal == 1:
+            votes['ai'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': 0.75}
+        elif ai_signal == -1:
+            votes['ai'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': 0.75}
+        else:
+            votes['ai'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+            
+        # 5. Confluence Score Vote
+        if confluence_score >= 5:
+            # Direction determined by caller, assume BUY for scoring
+            votes['confluence'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+        elif confluence_score >= 4:
+            votes['confluence'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+        else:
+            votes['confluence'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+        
+        # Count agreements for BUY and SELL
+        buy_votes = sum(1 for v in votes.values() if v['direction'] == 'BUY')
+        sell_votes = sum(1 for v in votes.values() if v['direction'] == 'SELL')
+        neutral_votes = sum(1 for v in votes.values() if v['direction'] == 'NEUTRAL')
+        
+        # Calculate weighted ensemble score (0-1 scale)
+        buy_score = sum(v['weight'] * v['confidence'] for v in votes.values() if v['direction'] == 'BUY')
+        sell_score = sum(v['weight'] * v['confidence'] for v in votes.values() if v['direction'] == 'SELL')
+        
+        # Normalize to 0-1
+        ensemble_score = max(buy_score, sell_score)
+        
+        # Determine agreement level
+        max_agreement = max(buy_votes, sell_votes)
+        
+        return round(ensemble_score, 3), max_agreement, votes
 
     def _calculate_confluence(self, symbol, df, direction, h1, h4, m5=0):
         score = 0
