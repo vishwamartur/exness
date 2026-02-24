@@ -91,9 +91,9 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit mu
 
 
 # ─── Trade Management ────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 5 minutes between trades
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 1 minute between trades (reduced from 5 min)
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 3.0))  # Scale up for A+ setups
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 20))     # Cap daily trade count (Reduced from 100)
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 15))     # Increased for more trading opportunities
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 50.0)) # Stop trading if daily loss > $50
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))  # Max simultaneous positions total
 MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
