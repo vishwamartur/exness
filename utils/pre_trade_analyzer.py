@@ -33,6 +33,10 @@ class PreTradeAnalyzer:
         self.pattern_memory = get_pattern_memory()
         self.cache = {}  # Cache for recent analyses
         
+    def _get_primary_timeframe(self) -> str:
+        """Get the primary timeframe for regime analysis."""
+        return "M15"  # Use M15 as primary timeframe for regime detection
+        
     def analyze_entry_opportunity(self, symbol: str, direction: str, 
                                 timeframe: str = "M15") -> Dict:
         """
@@ -52,7 +56,17 @@ class PreTradeAnalyzer:
             return self._create_analysis_result(False, "No data available", {})
         
         # Get current market regime
-        regime = self.analyst.get_regime(symbol, data_dict)
+        # Use the regime detector directly
+        df_primary = data_dict.get(self._get_primary_timeframe())
+        if df_primary is not None:
+            regime, _ = self.analyst.regime_detector.get_regime(df_primary)
+        else:
+            regime = 'NORMAL'
+        
+        # Fallback to analyze_session for more comprehensive analysis
+        if df_primary is not None:
+            analysis_result = self.analyst.analyze_session(symbol, df_primary)
+            regime = analysis_result.get('regime', regime)
         
         # Analyze trend across multiple timeframes
         trend_analysis = self._analyze_multi_timeframe_trend(data_dict, direction)
