@@ -21,11 +21,12 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Enhanced Hourly Trade Counting Mechanism](#enhanced-hourly-trade-counting-mechanism)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 This document describes the comprehensive risk management system implemented in the trading bot. It covers pre-scan and execution risk controls, kill switch mechanisms, payoff mandate enforcement, position sizing using a Kelly-derived approach, daily loss controls, correlation filtering for diversification, news blackout filters for high-impact events, spread gating, and the trade journal system for performance tracking and historical data management. It also documents parameter configuration, concrete risk control scenarios, impact assessment, and operational procedures for bypass mechanisms, emergency procedures, and performance monitoring.
@@ -330,6 +331,34 @@ E -- "Opposite" --> G
 **Section sources**
 - [risk_manager.py](file://utils/risk_manager.py#L399-L548)
 - [mt5_client.py](file://execution/mt5_client.py#L296-L352)
+
+## Enhanced Hourly Trade Counting Mechanism
+- **Purpose**: Implements hourly trade counting to limit commission costs by restricting the number of trades per hour.
+- **Implementation**: Queries MT5 history for deals within the last hour and counts unique entry deals.
+- **Configuration**: Controlled by `MAX_TRADES_PER_HOUR` setting with default value of 8 trades per hour.
+- **Benefits**: Prevents excessive trading frequency that could erode profits through commission costs.
+
+```mermaid
+flowchart TD
+Start(["check_pre_scan(symbol)"]) --> CB["Check Circuit Breaker"]
+CB --> DL["Check Daily Trades"]
+DL --> HT["Hourly Trade Count Check"]
+HT --> PS["Per-Symbol Cooldown Check"]
+PS --> KS["Update Symbol Stats (if stale)"]
+KS --> KSW["Kill Switch Check"]
+KSW --> PM["Payoff Mandate Check"]
+PM --> DLP["Daily Loss P&L Check"]
+DLP --> CD["Cooldown Check"]
+CD --> SP["Spread Check"]
+SP --> NB["News Blackout Check"]
+NB --> SG["Session Gate Check"]
+SG --> OK["Allow"]
+SG --> DENY["Deny with reason"]
+```
+
+**Section sources**
+- [risk_manager.py](file://utils/risk_manager.py#L51-L67)
+- [settings.py](file://config/settings.py#L102)
 
 ## Dependency Analysis
 - RiskManager depends on:
