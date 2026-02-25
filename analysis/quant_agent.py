@@ -186,7 +186,9 @@ class QuantAgent:
         last = df.iloc[-1:]
         X = self._prepare_X(last, symbol)
         try:
-            return self.model.predict_proba(X)[0][1], self.model.predict(X)[0]
+            # Convert to numpy array to avoid feature names warning
+            X_array = X.values if hasattr(X, 'values') else X
+            return self.model.predict_proba(X_array)[0][1], self.model.predict(X_array)[0]
         except: return 0.5, 0
         
     def _get_xgb_prediction(self, df, symbol=None):
@@ -194,7 +196,9 @@ class QuantAgent:
         last = df.iloc[-1:]
         X = self._prepare_X(last, symbol)
         try:
-            return self.xgb_model.predict_proba(X)[0][1], self.xgb_model.predict(X)[0]
+            # Convert to numpy array to avoid feature names warning
+            X_array = X.values if hasattr(X, 'values') else X
+            return self.xgb_model.predict_proba(X_array)[0][1], self.xgb_model.predict(X_array)[0]
         except: return 0.5, 0
 
     def _prepare_X(self, row, symbol=None):

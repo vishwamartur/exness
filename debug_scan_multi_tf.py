@@ -78,10 +78,10 @@ def debug_scan_multi_tf():
             # 3. Check ML Prob
             ml_prob = 0.5
             try:
-                rf_prob, _ = strategy._get_rf_prediction(df_features)
+                rf_prob, _ = strategy.quant._get_rf_prediction(df_features)
                 ml_prob = rf_prob 
-                if strategy.xgb_model:
-                    xgb_prob, _ = strategy._get_xgb_prediction(df_features)
+                if strategy.quant.xgb_model:
+                    xgb_prob, _ = strategy.quant._get_xgb_prediction(df_features)
                     ml_prob = (rf_prob + xgb_prob) / 2
             except Exception as e:
                 print(f"  ML Calc Error: {e}")

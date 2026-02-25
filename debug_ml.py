@@ -24,11 +24,11 @@ def debug_ml():
     df_features = features.add_technical_features(df)
     
     print("Predicting...")
-    rf_prob, _ = strategy._get_rf_prediction(df_features)
+    rf_prob, _ = strategy.quant._get_rf_prediction(df_features)
     print(f"RF Prob: {rf_prob}")
     
-    if strategy.xgb_model:
-        xgb_prob, _ = strategy._get_xgb_prediction(df_features)
+    if strategy.quant.xgb_model:
+        xgb_prob, _ = strategy.quant._get_xgb_prediction(df_features)
         print(f"XGB Prob: {xgb_prob}")
 
     print("Checking H4 Trend...")

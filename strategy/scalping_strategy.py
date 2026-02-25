@@ -177,8 +177,10 @@ class ScalpingStrategy:
             drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'spread', 'real_volume', 'target']
             X = last_row.drop(columns=[c for c in drop_cols if c in last_row.columns])
             
-        rf_prediction = self.model.predict(X)[0]
-        rf_prob = self.model.predict_proba(X)[0][1]
+        # Convert to numpy array to avoid feature names warning
+        X_array = X.values if hasattr(X, 'values') else X
+        rf_prediction = self.model.predict(X_array)[0]
+        rf_prob = self.model.predict_proba(X_array)[0][1]
         
         # 6. HF Chronos
         hf_signal = 0 
