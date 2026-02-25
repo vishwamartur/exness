@@ -48,24 +48,6 @@ class RiskManager:
             self.state.set("daily_trades", 0)
             self.state.set("daily_trades_date", now_date.isoformat())
     
-    def _count_trades_last_hour(self) -> int:
-        """Count trades in the last hour to limit commission costs."""
-        try:
-            from datetime import timedelta
-            now = datetime.now(timezone.utc)
-            one_hour_ago = now - timedelta(hours=1)
-            
-            # Get deals from MT5 history
-            deals = mt5.history_deals_get(one_hour_ago, now)
-            if deals is None:
-                return 0
-            
-            # Count unique entry deals (not exits)
-            entry_deals = [d for d in deals if d.entry in [0, 1]]  # 0=in, 1=out
-            return len(entry_deals)
-        except:
-            return 0
-
     def check_pre_scan(self, symbol):
         """
         Fast checks run BEFORE heavy analysis.
@@ -80,12 +62,6 @@ class RiskManager:
         self._check_daily_reset()
         if self.daily_trades >= settings.MAX_DAILY_TRADES:
             return False, "Daily Limit Reached"
-        
-        # 1b. Hourly Trade Limit (to reduce commission costs)
-        trades_last_hour = self._count_trades_last_hour()
-        max_trades_per_hour = getattr(settings, 'MAX_TRADES_PER_HOUR', 8)
-        if trades_last_hour >= max_trades_per_hour:
-            return False, f"Hourly Limit ({trades_last_hour}/{max_trades_per_hour})"
         
         # 1c. Per-Symbol Cooldown (prevent over-trading same pair)
         last_trade = self.last_trade_time.get(symbol, 0)

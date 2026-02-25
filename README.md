@@ -56,13 +56,13 @@ InstitutionalStrategy (Orchestrator)
 | **Risk Override** | Whitelist key pairs (EURUSD, GBPUSD, BTCUSD…) to always allow |
 | **ATR Position Sizing** | Kelly-adjusted lot size based on account equity and SL distance |
 | **Daily Trade Limit** | Caps total trades per day |
-| **Hourly Trade Limit** | Limits trades per hour to reduce commission costs (MAX_TRADES_PER_HOUR) |
 | **Daily Loss Limit** | Hard stop on total daily drawdown |
 | **Partial Close / Breakeven** | Locks in profit at 0.8R, closes 25% at first TP |
 | **Trailing Stop** | ATR-based — activates at 2× ATR profit, trails 0.5× ATR |
 | **News Blackout** | Skips pairs during high-impact calendar events |
 | **Spread Gate** | Skips pairs with spread > configurable max |
 | **NEUTRAL Guard** | Hard block — only BUY or SELL can be executed |
+| **Adaptive Position Management** | Real-time ML-based position optimization (hold/expand/close) |
 
 ### 📊 React Dashboard (Real-Time)
 - Vite + React live dashboard auto-launches when the bot starts
@@ -70,6 +70,30 @@ InstitutionalStrategy (Orchestrator)
 - **5 panels**: Account stats · Scanner grid (all pairs) · Open positions (live P&L) · Trade feed · Event log
 - REST endpoints: `/api/account` `/api/positions` `/api/trades` `/api/scan` `/api/state`
 - Positions fetched **live from MT5** on every REST call (not stale cache)
+
+### 🤖 Adaptive Position Management
+
+The system now includes intelligent position management that uses real-time ML predictions to optimize profits:
+
+**Key Features**:
+- **Real-time Analysis**: Continuously evaluates open positions using ML models
+- **Dynamic Position Sizing**: Expands winning positions when market conditions are favorable
+- **Profit Protection**: Automatically closes or partially closes positions based on ML predictions
+- **Trend Alignment**: Holds positions longer when trend and ML signals align
+- **Risk Management**: Closes positions when opposing signals are detected
+
+**Decision Logic**:
+- ML prediction confidence and direction
+- Current trend strength and alignment
+- Market volatility assessment
+- Position profit/loss in pips
+- Risk-reward ratio
+
+**Actions Taken**:
+- **HOLD**: Keep position when conditions are favorable
+- **EXPAND**: Increase position size for strong winning trades
+- **PARTIAL_CLOSE**: Lock in profits while maintaining exposure
+- **CLOSE**: Exit positions when conditions turn unfavorable
 
 ### 📱 Telegram Alerts (@vcrpttrade_bot)
 Real-time push notifications — non-blocking, never slows the trading loop:

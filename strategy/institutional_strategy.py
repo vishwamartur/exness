@@ -28,6 +28,7 @@ from utils.data_cache import DataCache
 from utils.trade_journal import TradeJournal
 from utils.risk_manager import RiskManager
 from utils.news_filter import is_news_blackout, get_active_events
+from utils.adaptive_position_manager import AdaptivePositionManager
 from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
 from analysis.researcher_agent import ResearcherAgent
@@ -62,6 +63,7 @@ class InstitutionalStrategy:
         self.quant = QuantAgent()
         self.researcher = ResearcherAgent()
         self.critic = CriticAgent(on_event=on_event)
+        self.adaptive_manager = AdaptivePositionManager(mt5_client, self.quant)
         
         # --- STATE -------------------------------------------------------
         self.last_trade_time = {}
@@ -97,9 +99,17 @@ class InstitutionalStrategy:
     # =======================================================================
 
     async def run_scan_loop(self):
-        # 0. Manage Positions (Agents)
-        # Agents now handle their own exits (Regime, Trailing Stop, etc)
+        # 0. Manage Positions (Agents + Adaptive Manager)
+        # Agents handle their own exits, Adaptive Manager provides ML-based optimization
         manage_tasks = [agent.manage_active_trades() for agent in self.agents.values()]
+        
+        # Add adaptive position management
+        adaptive_actions = self.adaptive_manager.manage_positions()
+        if adaptive_actions:
+            success_count = self.adaptive_manager.execute_actions(adaptive_actions)
+            if success_count > 0:
+                print(f"[ADAPTIVE] Executed {success_count} position management actions")
+                
         await asyncio.gather(*manage_tasks, return_exceptions=True)
 
         # 1. Global Checks
