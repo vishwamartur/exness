@@ -29,6 +29,7 @@ from utils.trade_journal import TradeJournal
 from utils.risk_manager import RiskManager
 from utils.news_filter import is_news_blackout, get_active_events
 from utils.adaptive_position_manager import AdaptivePositionManager
+from utils.pre_trade_analyzer import PreTradeAnalyzer
 from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
 from analysis.researcher_agent import ResearcherAgent
@@ -64,6 +65,7 @@ class InstitutionalStrategy:
         self.researcher = ResearcherAgent()
         self.critic = CriticAgent(on_event=on_event)
         self.adaptive_manager = AdaptivePositionManager(mt5_client, self.quant)
+        self.pre_trade_analyzer = PreTradeAnalyzer(self.quant, self.analyst)
         
         # --- STATE -------------------------------------------------------
         self.last_trade_time = {}
@@ -346,6 +348,22 @@ class InstitutionalStrategy:
         tp_dist = setup['tp_distance']
         
         if sl_dist <= 0: return
+        
+        # --- PRE-TRADE ANALYSIS ---
+        print(f"[PRE-TRADE] Analyzing {symbol} {direction} entry...")
+        analysis = self.pre_trade_analyzer.analyze_entry_opportunity(symbol, direction)
+        
+        # Check if we should proceed with the trade
+        if not analysis['should_enter']:
+            print(f"[PRE-TRADE] Entry BLOCKED for {symbol} {direction}: {analysis['recommendation']}")
+            print(f"[PRE-TRADE] Confidence: {analysis['confidence_score']:.3f}")
+            for reason in analysis['reasoning']:
+                print(f"  - {reason}")
+            return
+        
+        print(f"[PRE-TRADE] Entry APPROVED for {symbol} {direction}: {analysis['recommendation']}")
+        print(f"[PRE-TRADE] Confidence: {analysis['confidence_score']:.3f}")
+        print(f"[PRE-TRADE] Component scores: {analysis['component_scores']}")
 
         # Guard 1: Never execute NEUTRAL direction
         if direction not in ('BUY', 'SELL'):
@@ -440,7 +458,9 @@ class InstitutionalStrategy:
                 session=self._get_current_session(),
                 researcher_action=setup.get('researcher_action', 'NONE'),
                 researcher_confidence=setup.get('researcher_confidence', 0),
-                researcher_reason=setup.get('researcher_reason', 'N/A')
+                researcher_reason=setup.get('researcher_reason', 'N/A'),
+                pre_trade_confidence=analysis.get('confidence_score', 0),
+                pre_trade_reasoning=" | ".join(analysis.get('reasoning', []))
             )
             self.daily_trade_count += 1
 

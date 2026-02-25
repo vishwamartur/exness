@@ -82,6 +82,25 @@ The system now includes intelligent position management that uses real-time ML p
 - **Trend Alignment**: Holds positions longer when trend and ML signals align
 - **Risk Management**: Closes positions when opposing signals are detected
 
+### 🔍 Pre-Trade Analysis with RAG
+
+Advanced pre-trade analysis system that prevents poor entry timing:
+
+**Key Features**:
+- **Multi-Timeframe Trend Analysis**: Analyzes trends across M1, M5, M15, H1, H4
+- **ML-Based Entry Validation**: Uses Random Forest and XGBoost for entry confirmation
+- **RAG Historical Context**: Retrieves similar historical patterns for context
+- **Volatility Assessment**: Evaluates current market volatility for risk management
+- **Momentum Analysis**: Checks RSI, MACD, and other momentum indicators
+- **Regime Awareness**: Adjusts decisions based on market regime (Risk-On/Risk-Off)
+
+**Decision Process**:
+1. **Trend Capture**: Ensures alignment across multiple timeframes
+2. **ML Validation**: Confirms entry with ensemble ML models
+3. **RAG Context**: Checks historical performance of similar patterns
+4. **Risk Assessment**: Evaluates volatility and momentum conditions
+5. **Final Decision**: Weighted scoring system determines entry approval
+
 **Decision Logic**:
 - ML prediction confidence and direction
 - Current trend strength and alignment

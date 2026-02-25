@@ -80,6 +80,12 @@ class TradeJournal:
             cursor.execute("ALTER TABLE trades ADD COLUMN lesson_learned TEXT")
             cursor.execute("ALTER TABLE trades ADD COLUMN grading_score INTEGER")
         except: pass
+        
+        # Pre-trade Analysis Columns
+        try:
+            cursor.execute("ALTER TABLE trades ADD COLUMN pre_trade_confidence REAL")
+            cursor.execute("ALTER TABLE trades ADD COLUMN pre_trade_reasoning TEXT")
+        except: pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_summary (
