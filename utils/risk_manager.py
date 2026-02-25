@@ -83,7 +83,7 @@ class RiskManager:
         
         # 1b. Hourly Trade Limit (to reduce commission costs)
         trades_last_hour = self._count_trades_last_hour()
-        max_trades_per_hour = getattr(settings, 'MAX_TRADES_PER_HOUR', 3)
+        max_trades_per_hour = getattr(settings, 'MAX_TRADES_PER_HOUR', 8)
         if trades_last_hour >= max_trades_per_hour:
             return False, f"Hourly Limit ({trades_last_hour}/{max_trades_per_hour})"
         
