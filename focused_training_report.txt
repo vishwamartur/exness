@@ -1,0 +1,30 @@
+FOCUSED MODEL TRAINING REPORT
+Date: 2026-02-25 10:47:08
+Symbols: EURUSD, GBPUSD, USDJPY, XAUUSD, BTCUSD, ETHUSD
+Timeframe: H1
+Total Samples: 212,723
+
+Symbol Stats:
+  EURUSD: 31,922 bars | Buy: 10.6% | Sell: 10.4%
+  GBPUSD: 31,922 bars | Buy: 9.3% | Sell: 10.0%
+  USDJPY: 31,922 bars | Buy: 11.6% | Sell: 10.8%
+  XAUUSD: 30,495 bars | Buy: 13.3% | Sell: 8.3%
+  BTCUSD: 43,231 bars | Buy: 11.2% | Sell: 11.1%
+  ETHUSD: 43,231 bars | Buy: 11.1% | Sell: 11.8%
+
+Top Features:
+  low_50: 0.0257
+  sma_200: 0.0254
+  ema_50: 0.0251
+  liq_high: 0.0250
+  liq_low: 0.0249
+  high_50: 0.0245
+  ob_bearish: 0.0238
+  atr_rel: 0.0236
+  ob_bullish: 0.0234
+  vwap: 0.0233
+  swing_high: 0.0230
+  ema_9: 0.0227
+  prev_swing_low: 0.0225
+  fvg_bullish: 0.0223
+  prev_swing_high: 0.0218

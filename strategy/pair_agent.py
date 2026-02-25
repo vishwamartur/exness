@@ -119,29 +119,29 @@ class PairAgent:
             # Let's add simple spread check if possible, or assume caller handles it.
             # Ideally PairAgent is autonomous.
             
-            # Fetch Primary Data (H1 for trend trading)
-            df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 500)
+            # Fetch Primary Data
+            df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000) # Increased for Scalping Indicators (M1)
             
             if df is None or len(df) < 100:
                 return None, "Insufficient Data"
 
             data_dict = {self.timeframe: df}
             
-            # Fetch Multi-Timeframe Data for trend confirmation
-            # H4 for higher timeframe trend
-            h4 = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 200)
-            if h4 is not None:
-                data_dict['H4'] = h4
+            # Fetch Multi-Timeframe Data if enabled
+            if getattr(settings, 'M5_TREND_FILTER', False):
+                 m5 = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 100)
+                 if m5 is not None:
+                    data_dict['M5'] = m5
             
-            # D1 for major trend direction
-            d1 = await run_in_executor(loader.get_historical_data, self.symbol, "D1", 100)
-            if d1 is not None:
-                data_dict['D1'] = d1
+            if settings.H1_TREND_FILTER:
+                 h1 = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 100)
+                 if h1 is not None:
+                    data_dict['H1'] = h1
             
-            # M15 for entry timing (optional)
-            m15 = await run_in_executor(loader.get_historical_data, self.symbol, "M15", 100)
-            if m15 is not None:
-                data_dict['M15'] = m15
+            if settings.H4_TREND_FILTER:
+                 h4 = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 60)
+                 if h4 is not None:
+                    data_dict['H4'] = h4
                  
             return data_dict, "OK"
             
@@ -207,27 +207,6 @@ class PairAgent:
         # AI-Powered Market Regime Filter (Enhanced)
         signal = q_res.get('direction', 'NEUTRAL')
         
-        # Multi-Timeframe Trend Alignment (Trend Trading)
-        # Only trade when H1, H4, and D1 all align
-        h4_trend = self._compute_trend(data_dict.get('H4')) if 'H4' in data_dict else 0
-        d1_trend = self._compute_trend(data_dict.get('D1')) if 'D1' in data_dict else 0
-        
-        # Convert signal to trend direction
-        signal_trend = 1 if signal == 'BUY' else (-1 if signal == 'SELL' else 0)
-        
-        # Check alignment: H1 signal should match H4 and D1 trends
-        trend_alignment = 0
-        if h4_trend != 0 and h4_trend == signal_trend:
-            trend_alignment += 1
-        if d1_trend != 0 and d1_trend == signal_trend:
-            trend_alignment += 1
-            
-        # Require at least 1 of 2 higher timeframes to align
-        if trend_alignment < 1:
-            return None, f"Trend Mismatch: H1={signal}, H4={'UP' if h4_trend>0 else 'DOWN' if h4_trend<0 else 'FLAT'}, D1={'UP' if d1_trend>0 else 'DOWN' if d1_trend<0 else 'FLAT'}"
-        
-        print(f"[{self.symbol}] Trend Aligned: H1={signal}, H4={'UP' if h4_trend>0 else 'DOWN'}, D1={'UP' if d1_trend>0 else 'DOWN'} ({trend_alignment}/2)")
-        
         # Get detailed regime classification
         from analysis.regime import RegimeDetector
         regime_detector = RegimeDetector()
@@ -290,6 +269,9 @@ class PairAgent:
         min_profit_distance = min_profit_pips * pip_value
         if tp_dist < min_profit_distance:
             return None, f"TP too small for commission ({tp_dist:.5f} < {min_profit_distance:.5f} = {min_profit_pips} pips)"
+        min_tp = spread_price * 3
+        if tp_dist < min_tp:
+            tp_dist = min_tp
         
         # Enforce Min Risk:Reward
         if sl_dist > 0:
@@ -466,9 +448,7 @@ class PairAgent:
                 pass
 
         # 1. Standard Risk Actions
-        # Use wider trailing for trend trading
-        trend_trailing_mult = getattr(settings, 'TREND_TRAILING_ATR_MULT', 3.0)
-        actions = self.risk_manager.monitor_positions(self.symbol, positions, tick, atr=atr, trailing_mult=trend_trailing_mult)
+        actions = self.risk_manager.monitor_positions(self.symbol, positions, tick, atr=atr)
         
         for act in actions:
             try:

@@ -49,12 +49,23 @@ class DQNNetwork(nn.Module):
         self.relu = nn.ReLU()
         
     def forward(self, x):
-        x = self.relu(self.bn1(self.fc1(x)))
-        x = self.dropout(x)
-        x = self.relu(self.bn2(self.fc2(x)))
-        x = self.dropout(x)
-        x = self.relu(self.bn3(self.fc3(x)))
-        x = self.fc4(x)
+        # Handle single sample (batch norm requires batch size > 1)
+        if x.size(0) == 1:
+            self.eval()  # Switch to eval mode for single sample
+            x = self.relu(self.fc1(x))
+            x = self.dropout(x)
+            x = self.relu(self.fc2(x))
+            x = self.dropout(x)
+            x = self.relu(self.fc3(x))
+            x = self.fc4(x)
+            self.train()  # Switch back to train mode
+        else:
+            x = self.relu(self.bn1(self.fc1(x)))
+            x = self.dropout(x)
+            x = self.relu(self.bn2(self.fc2(x)))
+            x = self.dropout(x)
+            x = self.relu(self.bn3(self.fc3(x)))
+            x = self.fc4(x)
         return x
 
 
