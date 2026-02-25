@@ -55,6 +55,8 @@ InstitutionalStrategy (Orchestrator)
 | **Payoff Mandate** | Blocks symbols where AvgLoss > 2× AvgWin historically |
 | **Risk Override** | Whitelist key pairs (EURUSD, GBPUSD, BTCUSD…) to always allow |
 | **ATR Position Sizing** | Kelly-adjusted lot size based on account equity and SL distance |
+| **Daily Trade Limit** | Caps total trades per day |
+| **Hourly Trade Limit** | Limits trades per hour to reduce commission costs (MAX_TRADES_PER_HOUR) |
 | **Daily Loss Limit** | Hard stop on total daily drawdown |
 | **Partial Close / Breakeven** | Locks in profit at 0.8R, closes 25% at first TP |
 | **Trailing Stop** | ATR-based — activates at 2× ATR profit, trails 0.5× ATR |
