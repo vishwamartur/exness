@@ -170,7 +170,18 @@ class AdaptivePositionManager:
         direction = "BUY" if position.type == 0 else "SELL"
         
         # Current position metrics
-        risk_reward = abs(pips_pnl) / max(position.sl_distance * self._get_pip_value(symbol), 0.1)
+        # Calculate SL distance from current price
+        entry_price = position.price_open
+        sl_price = position.sl
+        if sl_price > 0:  # SL is set
+            if direction == "BUY":
+                sl_distance = abs(entry_price - sl_price)
+            else:  # SELL
+                sl_distance = abs(sl_price - entry_price)
+        else:
+            sl_distance = 0.001  # Default small value if no SL
+        
+        risk_reward = abs(pips_pnl) / max(sl_distance * self._get_pip_value(symbol), 0.1)
         
         # Decision factors
         factors = {
