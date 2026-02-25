@@ -24,11 +24,11 @@ class ResearcherAgent:
         }
         """
         # 1. Prepare Facts
-        direction = quant_data.get('direction', 'NEUTRAL')
-        score = quant_data.get('score', 0)
-        ml_prob = quant_data.get('ml_prob', 0)
-        regime = analyst_data.get('regime', 'NORMAL')
-        h4_trend = quant_data.get('h4_trend', 0)
+        direction = quant_data.get('direction', 'NEUTRAL') if isinstance(quant_data, dict) else 'NEUTRAL'
+        score = quant_data.get('score', 0) if isinstance(quant_data, dict) else 0
+        ml_prob = quant_data.get('ml_prob', 0) if isinstance(quant_data, dict) else 0
+        regime = analyst_data.get('regime', 'NORMAL') if isinstance(analyst_data, dict) else 'NORMAL'
+        h4_trend = quant_data.get('h4_trend', 0) if isinstance(quant_data, dict) else 0
         
         # 0. Check Requisites
         if not self.advisor.api_key:
@@ -55,20 +55,31 @@ class ResearcherAgent:
         ACTION | CONFIDENCE | REASON
         """
         
+        # Ensure variables are defined to prevent undefined name errors
+        safe_direction = str(direction) if direction is not None else 'NEUTRAL'
+        safe_score = float(score) if score is not None else 0
+        safe_ml_prob = float(ml_prob) if ml_prob is not None else 0
+        safe_regime = str(regime) if regime is not None else 'NORMAL'
+        safe_h4_trend = float(h4_trend) if h4_trend is not None else 0
+        safe_details = str(quant_data.get('details', 'N/A')) if isinstance(quant_data, dict) else 'N/A'
+        safe_rsi = float(quant_data['features'].get('rsi', 0)) if isinstance(quant_data.get('features', {}), dict) else 0
+        safe_adx = float(quant_data['features'].get('adx', 0)) if isinstance(quant_data.get('features', {}), dict) else 0
+        safe_close = float(quant_data['features'].get('close', 0)) if isinstance(quant_data.get('features', {}), dict) else 0
+        
         user_prompt = f"""
         Analyze this trade for {symbol} ({settings.TIMEFRAME}):
         
-        Proposed Action: {direction} (Score: {score}/6)
+        Proposed Action: {safe_direction} (Score: {safe_score}/6)
         
         Factors:
-        - ML Confidence: {ml_prob:.2f} (Random Forest/XGBoost)
-        - Market Regime: {regime}
-        - H4 Trend: {h4_trend}
-        - Technical Details: {quant_data.get('details')}
+        - ML Confidence: {safe_ml_prob:.2f} (Random Forest/XGBoost)
+        - Market Regime: {safe_regime}
+        - H4 Trend: {safe_h4_trend}
+        - Technical Details: {safe_details}
         - Indicators:
-          RSI: {quant_data['features'].get('rsi', 0):.1f}
-          ADX: {quant_data['features'].get('adx', 0):.1f}
-          Close: {quant_data['features'].get('close', 0):.5f}
+          RSI: {safe_rsi:.1f}
+          ADX: {safe_adx:.1f}
+          Close: {safe_close:.5f}
         
         Debate the Bull and Bear cases. Then provide the final conclusion.
         Output strictly as: ACTION | CONFIDENCE | REASON
