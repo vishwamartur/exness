@@ -1,0 +1,21 @@
+﻿==================================================
+  MT5 BOT EXECUTION HISTORY ANALYSIS
+==================================================
+
+[INFO] Total Registered Trades: 101
+
+[PERFORMANCE METRICS]
+  Completed Trades : 2
+  Win Rate         : 0.0% (0W / 2L)
+  Net Profit       : $-100.00
+  Average Winner   : $0.00
+  Average Loser    : $-50.00
+  Risk/Reward Ratio: 0.00
+
+[TOP PAIRS BY VOLUME]
+  MockUSD    |   1 trades | Net: $-50.00
+  DEBUG_USD  |   1 trades | Net: $-50.00
+
+[LAST 5 TRADES]
+  DEBUG_USD | BUY  | LOSS | $-50.00 | Reason: Debug Trade for Dashboard...
+  MockUSD  | BUY  | LOSS | $-50.00 | Reason: Strong Uptrend detected by H4 ADX...
