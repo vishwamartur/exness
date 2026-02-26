@@ -327,11 +327,18 @@ class InstitutionalStrategy:
                     best['researcher_action'] = research['action']
                     best['researcher_confidence'] = research['confidence']
                     best['researcher_reason'] = research['reason']
-                    self._execute_trade(best)
+                    try:
+                        self._execute_trade(best)
+                    except Exception as e:
+                        print(f"[ERROR] Trade execution failed: {e}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"  [X] Candidate rejected by Researcher.")
             except Exception as e:
                 print(f"[ERROR] Researcher failed: {e}. Skipping trade.")
+                import traceback
+                traceback.print_exc()
         else:
              print("[SCANNER] No candidates found.")
 
@@ -458,9 +465,7 @@ class InstitutionalStrategy:
                 session=self._get_current_session(),
                 researcher_action=setup.get('researcher_action', 'NONE'),
                 researcher_confidence=setup.get('researcher_confidence', 0),
-                researcher_reason=setup.get('researcher_reason', 'N/A'),
-                pre_trade_confidence=analysis.get('confidence_score', 0),
-                pre_trade_reasoning=" | ".join(analysis.get('reasoning', []))
+                researcher_reason=setup.get('researcher_reason', 'N/A')
             )
             self.daily_trade_count += 1
 

@@ -81,7 +81,7 @@ class PreTradeAnalyzer:
         volatility_analysis = self._assess_volatility(data_dict[timeframe])
         
         # Get momentum indicators
-        momentum_analysis = self._analyze_momentum(data_dict[timeframe])
+        momentum_analysis = self._analyze_momentum(data_dict[timeframe], direction)
         
         # Combine all factors for final decision
         final_decision = self._make_entry_decision(
@@ -256,7 +256,7 @@ class PreTradeAnalyzer:
             'atr_value': atr
         }
     
-    def _analyze_momentum(self, df) -> Dict:
+    def _analyze_momentum(self, df, direction: str = 'BUY') -> Dict:
         """Analyze price momentum indicators."""
         if len(df) < 14:
             return {'rsi': 50, 'macd_histogram': 0, 'momentum_score': 0.5}
@@ -343,16 +343,16 @@ class PreTradeAnalyzer:
         regime_multiplier = self._get_regime_multiplier(regime, direction)
         final_score = weighted_score * regime_multiplier
         
-        # Determine entry recommendation
-        if final_score >= 0.75:
+        # Determine entry recommendation (lowered thresholds to allow more trades)
+        if final_score >= 0.65:
             recommendation = 'STRONG_ENTRY'
             should_enter = True
-        elif final_score >= 0.60:
+        elif final_score >= 0.40:  # Lowered from 0.60
             recommendation = 'ENTRY'
             should_enter = True
-        elif final_score >= 0.45:
+        elif final_score >= 0.25:  # Lowered from 0.45
             recommendation = 'CAUTION'
-            should_enter = False
+            should_enter = True  # Changed from False to allow execution with caution
         else:
             recommendation = 'AVOID'
             should_enter = False

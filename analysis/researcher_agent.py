@@ -1,5 +1,5 @@
 
-from analysis.mistral_advisor import MistralAdvisor
+from analysis.llm_advisor import get_advisor
 from config import settings
 
 class ResearcherAgent:
@@ -11,7 +11,7 @@ class ResearcherAgent:
     3. Provide final conviction score (0-100).
     """
     def __init__(self):
-        self.advisor = MistralAdvisor()
+        self.advisor = get_advisor()
         print("[AGENT] ResearcherAgent initialized.")
 
     async def conduct_research(self, symbol, quant_data, analyst_data):
@@ -30,8 +30,8 @@ class ResearcherAgent:
         regime = analyst_data.get('regime', 'NORMAL') if isinstance(analyst_data, dict) else 'NORMAL'
         h4_trend = quant_data.get('h4_trend', 0) if isinstance(quant_data, dict) else 0
         
-        # 0. Check Requisites
-        if not self.advisor.api_key:
+        # 0. Check Requisites (We look for any valid implementation, not just API Key presence, but some default objects might not have an api_key field)
+        if not hasattr(self.advisor, 'api_key') or not self.advisor.api_key:
             # Fallback for users without LLM
             print("[RESEARCHER] No API Key. Falling back to Technical Confidence.")
             return {

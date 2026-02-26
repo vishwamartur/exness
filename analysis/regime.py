@@ -115,8 +115,8 @@ class RegimeDetector:
         if bullish_div and adx > 20:
             return "REVERSAL_BULL", details
 
-        # 6. Check Ranging (Sideways)
-        if adx < 20 and bb_width < 0.015:
+        # 6. Check Ranging (Sideways) - Only if VERY tight consolidation
+        if adx < 20 and bb_width < 0.008:  # Tighter BB threshold (was 0.015)
             return "RANGING", details
 
         return "NORMAL", details
@@ -124,12 +124,15 @@ class RegimeDetector:
     def is_tradeable_regime(self, regime):
         """
         Returns True if the regime is suitable for trading.
-        Skip ranging and highly volatile markets.
+        Skip only extreme volatility. Allow RANGING with caution.
         """
         good_regimes = [
             'TRENDING', 'TRENDING_BULL', 'TRENDING_BEAR',
             'BREAKOUT_BULL', 'BREAKOUT_BEAR',
-            'NORMAL'
+            'NORMAL',
+            'RANGING',  # Allow ranging but with lower score
+            'REVERSAL_BULL', 'REVERSAL_BEAR',
+            'VOLATILE_LOW'  # Low volatility = potential breakout setup
         ]
         return regime in good_regimes
     
@@ -147,8 +150,8 @@ class RegimeDetector:
             'NORMAL': {'BUY': 5, 'SELL': 5},
             'REVERSAL_BULL': {'BUY': 6, 'SELL': 3},
             'REVERSAL_BEAR': {'BUY': 3, 'SELL': 6},
-            'VOLATILE_LOW': {'BUY': 4, 'SELL': 4},
-            'RANGING': {'BUY': 1, 'SELL': 1},
+            'VOLATILE_LOW': {'BUY': 5, 'SELL': 5},  # Increased from 4 (low vol = potential breakout)
+            'RANGING': {'BUY': 3, 'SELL': 3},  # Increased from 1 (allow with caution)
             'VOLATILE_HIGH': {'BUY': 0, 'SELL': 0}
         }
         

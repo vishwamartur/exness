@@ -1,5 +1,5 @@
 
-from analysis.mistral_advisor import MistralAdvisor
+from analysis.llm_advisor import get_advisor
 from analysis.regime import RegimeDetector
 from utils.news_filter import is_news_blackout, get_active_events
 from utils.shared_state import SharedState
@@ -13,7 +13,7 @@ class MarketAnalyst:
     3. News Event Filtering
     """
     def __init__(self):
-        self.mistral = MistralAdvisor()
+        self.mistral = get_advisor()
         self.regime_detector = RegimeDetector()
         self.state = SharedState()
         print("[AGENT] MarketAnalyst initialized.")

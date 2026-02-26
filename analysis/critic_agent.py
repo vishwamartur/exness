@@ -4,12 +4,12 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from config import settings
-from analysis.mistral_advisor import MistralAdvisor
+from analysis.llm_advisor import get_advisor
 from utils.trade_journal import DB_PATH
 
 class CriticAgent:
     def __init__(self, on_event=None):
-        self.advisor = MistralAdvisor()
+        self.advisor = get_advisor()
         self.db_path = DB_PATH
         self.on_event = on_event
         print("[AGENT] CriticAgent initialized.")

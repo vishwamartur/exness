@@ -219,8 +219,8 @@ class PairAgent:
         # Score regime alignment with trade direction
         regime_score, regime_reason = regime_detector.get_regime_score(regime_type, signal)
         
-        # Require minimum regime score for the direction
-        if regime_score < 5:
+        # Require minimum regime score for the direction (lowered from 5 to 2 to allow more trades)
+        if regime_score < 2:
             return None, f"Weak Regime ({regime_type}: {regime_score}/10) - {regime_reason}"
         
         # Log regime info for debugging

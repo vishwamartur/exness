@@ -26,10 +26,10 @@ InstitutionalStrategy (Orchestrator)
 
 | Agent | Role | Model |
 |-------|------|-------|
-| **QuantAgent** | Technical signals: SMC, FVG, confluence score 0–6 | XGBoost + Random Forest + LSTM |
-| **MarketAnalyst** | News-driven regime classification | Mistral / Gemini via REST |
-| **ResearcherAgent** | Bull vs Bear debate → final GO/NO-GO | Mistral / Gemini LLM |
-| **CriticAgent** | Async post-mortem, trade score 0–10 | LLM |
+| **QuantAgent** | Technical signals: SMC, FVG, confluence score 0–6 | XGBoost + Random Forest + TabTransformer + Sequence Transformer + LSTM |
+| **MarketAnalyst** | News-driven regime classification | Groq (Llama 3) / Mistral / Gemini via REST |
+| **ResearcherAgent** | Bull vs Bear debate → final GO/NO-GO | Groq (Llama 3) / Mistral / Gemini LLM |
+| **CriticAgent** | Async post-mortem, trade score 0–10 | Groq (Llama 3) / Mistral / Gemini LLM |
 | **RiskManager** | Pre-trade veto: kill switch, payoff, spread, session | Rule-based |
 
 ---
@@ -174,6 +174,7 @@ MAX_DAILY_LOSS_USD=50
 SCALP_SESSION_FILTER=True
 
 # AI (at least one required for ResearcherAgent)
+GROQ_API_KEY=your_groq_key
 MISTRAL_API_KEY=your_mistral_key
 
 # Telegram
@@ -191,9 +192,11 @@ python f:\mt5\utils\telegram_notifier.py
 
 ### 5. Train ML Models
 ```bash
-python train_model.py      # Random Forest
-python train_xgboost.py    # XGBoost
-python train_lstm.py       # LSTM (optional)
+python train_model.py                   # Random Forest
+python train_xgboost.py                 # XGBoost
+python train_tabtransformer.py          # TabTransformer (Attention-based tabular)
+python train_sequence_transformer.py    # Sequence Transformer (High ROI Temporal Attention)
+python train_lstm.py                    # LSTM (optional)
 ```
 
 ### 6. (Optional) Walk-Forward Optimisation

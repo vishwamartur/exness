@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import ta
+import warnings
 
 
 def add_technical_features(df):
@@ -61,17 +62,44 @@ def add_technical_features(df):
     df['adx'] = adx.adx()
     df['adx_pos'] = adx.adx_pos()  # +DI
     df['adx_neg'] = adx.adx_neg()  # -DI
+    
+    # Microstructure: Volatility of Volatility (Proxy for GARCH)
+    df['vol_of_vol'] = df['atr'].rolling(window=14).std() / df['atr']
 
-    # ─── 5. Volume Indicators ────────────────────────────────────────────
-    # VWAP approximation (using tick_volume as proxy)
+    # ─── 5. Volume & Order Flow Indicators ───────────────────────────────
     if 'tick_volume' in df.columns:
-        df['vwap'] = (df['close'] * df['tick_volume']).cumsum() / df['tick_volume'].cumsum()
-        df['dist_vwap'] = (df['close'] - df['vwap']) / df['vwap']
-        # Volume SMA for anomaly detection
+        # A. Rolling VWAP with +2 / -2 Standard Deviation Bands (VWAP Extremes)
+        # We use a 100-bar rolling window to accurately track intraday anchor points
+        vwap_window = 100
+        typical_price = (df['high'] + df['low'] + df['close']) / 3
+        tp_vol = typical_price * df['tick_volume']
+        
+        # Calculate trailing VWAP
+        roll_vol = df['tick_volume'].rolling(window=vwap_window, min_periods=10).sum()
+        roll_tp_vol = tp_vol.rolling(window=vwap_window, min_periods=10).sum()
+        df['vwap_rolling'] = roll_tp_vol / roll_vol.replace(0, np.nan)
+        
+        # Calculate Variance for STD Bands
+        # Var = E[x^2] - E[x]^2, where x is typical price weighted by volume...
+        # A simpler robust approximation is the rolling std of the typical price about the VWAP
+        df['vwap_std'] = typical_price.rolling(window=vwap_window, min_periods=10).std()
+        
+        df['vwap_upper'] = df['vwap_rolling'] + (2 * df['vwap_std'])
+        df['vwap_lower'] = df['vwap_rolling'] - (2 * df['vwap_std'])
+        
+        # Extremes: price distance from VWAP normalized by standard deviation
+        df['vwap_zscore'] = (df['close'] - df['vwap_rolling']) / df['vwap_std'].replace(0, np.nan)
+        df['vwap_zscore'] = df['vwap_zscore'].replace([np.inf, -np.inf], 0).fillna(0)
+
+        # Volume SMA anomaly detection
         df['vol_sma'] = df['tick_volume'].rolling(window=20).mean()
         df['vol_ratio'] = df['tick_volume'] / df['vol_sma']
 
-        # ─── 5b. Order Flow / Delta Volume ───────────────────────────────
+        # B. Volume Profile Analysis: Rolling Point of Control (POC)
+        # Approximate by finding the closing price with the highest rolling volume sum in a 50 bar window
+        df = _add_volume_profile_poc(df, lookback=50)
+
+        # C. Order Flow Imbalance (OFI)
         # Signed delta: positive = bullish candle, negative = bearish candle
         # Approximates buy (uptick) vs sell (downtick) volume pressure on M1
         candle_dir = np.where(df['close'] >= df['open'], 1, -1)
@@ -80,6 +108,13 @@ def add_technical_features(df):
         df['delta_vol_ratio'] = df['delta_vol'] / df['tick_volume'].replace(0, np.nan)  # (-1 to +1)
         # Normalised flow: > 0 means net buying, < 0 net selling pressure
         df['delta_vol_ratio'] = df['delta_vol_ratio'].fillna(0)
+        
+    # ─── 6. Bid-Ask Spread Dynamics ───────────────────────────────────────
+    if 'spread' in df.columns:
+        df['spread_sma'] = df['spread'].rolling(window=20).mean()
+        # Negative value implies tightening spread (institutional absorption/entry)
+        df['spread_tightening'] = (df['spread'] - df['spread_sma']) / df['spread_sma'].replace(0, np.nan)
+        df['spread_tightening'] = df['spread_tightening'].fillna(0)
 
     df = _add_market_structure(df)
     df = _add_order_blocks(df)
@@ -93,8 +128,50 @@ def add_technical_features(df):
         df[f'macd_diff_lag_{lag}'] = df['macd_diff'].shift(lag)
 
     # Clean NaN values
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.dropna(inplace=True)
 
+    return df
+
+def _add_volume_profile_poc(df, lookback=50):
+    """
+    Computes a Rolling Point of Control (POC) for Volume Profile Analysis.
+    Finds the dominant price level over the last `lookback` bars where max volume traded.
+    """
+    poc_series = np.full(len(df), np.nan)
+    
+    # We slice backwards from the end to build up rolling distributions efficiently.
+    # To save time on large dataframes, we can round prices to buckets.
+    # Average ATR gives a good dynamic bucket size.
+    mean_atr = df['atr'].mean() if 'atr' in df.columns else (df['close'].mean() * 0.001)
+    bucket_size = mean_atr * 0.5 if mean_atr > 0 else 0.0001
+    
+    closes = df['close'].values
+    vols = df['tick_volume'].values
+    
+    # We only apply POC computation to rows where lookback is satisfied.
+    for i in range(lookback, len(df)):
+        window_closes = closes[i-lookback:i]
+        window_vols = vols[i-lookback:i]
+        
+        # Round prices to bin them for distribution mapping
+        binned_prices = np.round(window_closes / bucket_size) * bucket_size
+        
+        # Sum volume by binned price level utilizing pandas groupby or dictionary
+        # Dictionary is faster for small lookback windows inside a loop
+        vol_profile = {}
+        for price, v in zip(binned_prices, window_vols):
+            vol_profile[price] = vol_profile.get(price, 0) + v
+            
+        # The Point of Control is the price bin with the highest volume sum
+        if vol_profile:
+            poc = max(vol_profile, key=vol_profile.get)
+            poc_series[i] = poc
+            
+    df['vp_poc'] = poc_series
+    df['vp_poc'] = df['vp_poc'].ffill().bfill()
+    df['dist_to_poc'] = (df['close'] - df['vp_poc']) / df['vp_poc'].replace(0, np.nan)
+    
     return df
 
 

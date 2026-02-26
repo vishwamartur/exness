@@ -24,6 +24,16 @@ try:
     LSTM_AVAILABLE = True
 except: LSTM_AVAILABLE = False
 
+try:
+    from strategy.tabtransformer_predictor import TabTransformerPredictor, load_tabtransformer_predictor
+    TABTRANSFORMER_AVAILABLE = True
+except: TABTRANSFORMER_AVAILABLE = False
+
+try:
+    from strategy.sequence_transformer import SequenceTransformerPredictor, load_sequence_transformer
+    SEQ_TRANSFORMER_AVAILABLE = True
+except: SEQ_TRANSFORMER_AVAILABLE = False
+
 def _strip_suffix(symbol):
     for suffix in ['m', 'c']:
         if symbol.endswith(suffix) and len(symbol) > 3:
@@ -35,13 +45,15 @@ class QuantAgent:
     """
     The 'Technician' Agent.
     Responsibilities:
-    1. ML Inference (RF, XGBoost, LSTM)
+    1. ML Inference (RF, XGBoost, LSTM, TabTransformer)
     2. Technical Analysis (Trend, Confluence)
     3. Signal Generation (Score 0-6)
     """
     def __init__(self):
         self.model = None       # RF
         self.xgb_model = None   # XGBoost
+        self.tabtransformer_predictor = None  # TabTransformer (NEW)
+        self.seq_transformer_predictor = None # Sequence Transformer (NEW)
         self.feature_cols = None
         self.hf_predictor = None
         self.lstm_predictors = {}
@@ -68,11 +80,35 @@ class QuantAgent:
         except Exception as e:
             print(f"[QUANT] Model load error: {e}")
 
-        # 2. LSTM
+        # 2. TabTransformer (NEW - Industry-Leading Architecture)
+        if TABTRANSFORMER_AVAILABLE and getattr(settings, 'USE_TABTRANSFORMER', True):
+            try:
+                models_dir = os.path.dirname(settings.MODEL_PATH)
+                tabtransformer_path = os.path.join(models_dir, 'tabtransformer_v1.pt')
+                if os.path.exists(tabtransformer_path):
+                    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                    self.tabtransformer_predictor = load_tabtransformer_predictor(tabtransformer_path, device=device)
+                    print(f"[QUANT] TabTransformer loaded from {tabtransformer_path}")
+            except Exception as e:
+                print(f"[QUANT] TabTransformer load error: {e}")
+
+        # 2b. Sequence Transformer (NEW - Attention-based temporal model)
+        if hasattr(settings, 'USE_SEQ_TRANSFORMER') and getattr(settings, 'USE_SEQ_TRANSFORMER', True) and SEQ_TRANSFORMER_AVAILABLE:
+            try:
+                models_dir = os.path.dirname(settings.MODEL_PATH)
+                seq_transformer_path = os.path.join(models_dir, 'seq_transformer_v1.pth')
+                if os.path.exists(seq_transformer_path):
+                    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                    self.seq_transformer_predictor = load_sequence_transformer(seq_transformer_path, device=device)
+                    print(f"[QUANT] Sequence Transformer loaded from {seq_transformer_path}")
+            except Exception as e:
+                print(f"[QUANT] Sequence Transformer load error: {e}")
+
+        # 3. LSTM
         if settings.USE_LSTM and LSTM_AVAILABLE:
             self._load_lstm_models()
 
-        # 3. Lag-Llama/Chronos
+        # 4. Lag-Llama/Chronos
         if settings.USE_LAG_LLAMA and LAG_LLAMA_AVAILABLE:
             try:
                 self.hf_predictor = get_lag_llama_predictor(settings)
@@ -130,7 +166,18 @@ class QuantAgent:
         # ML Predictions (with symbol for multi-pair model)
         rf_prob, _ = self._get_rf_prediction(df, symbol)
         xgb_prob, _ = self._get_xgb_prediction(df, symbol)
-        ml_prob = (rf_prob + xgb_prob) / 2 if self.xgb_model else rf_prob
+        tabtransformer_prob, _ = self._get_tabtransformer_prediction(df, symbol)  # NEW
+        seq_transformer_prob, _ = self._get_seq_transformer_prediction(df)        # NEW
+        
+        # Ensemble ML probability (average of available models)
+        models_available = sum([self.model is not None, self.xgb_model is not None, self.tabtransformer_predictor is not None, self.seq_transformer_predictor is not None])
+        if models_available > 0:
+            ml_prob = (rf_prob * (self.model is not None) + 
+                      xgb_prob * (self.xgb_model is not None) + 
+                      tabtransformer_prob * (self.tabtransformer_predictor is not None) +
+                      seq_transformer_prob * (self.seq_transformer_predictor is not None)) / models_available
+        else:
+            ml_prob = 0.5
         
         # AI Signal
         ai_signal = self._get_ai_signal(symbol, df)
@@ -149,9 +196,9 @@ class QuantAgent:
         direction = "BUY" if buy_score >= sell_score else "SELL"
         details = buy_details if direction == "BUY" else sell_details
         
-        # Enhanced Ensemble Voting
+        # Enhanced Ensemble Voting with TabTransformer & Sequence Transformer
         ensemble_score, agreement_count, model_votes = self._ensemble_vote(
-            ml_prob, ai_signal, best_score, lstm_pred, hf_pred
+            ml_prob, ai_signal, best_score, lstm_pred, hf_pred, tabtransformer_prob, seq_transformer_prob
         )
         
         return {
@@ -200,6 +247,31 @@ class QuantAgent:
             X_array = X.values if hasattr(X, 'values') else X
             return self.xgb_model.predict_proba(X_array)[0][1], self.xgb_model.predict(X_array)[0]
         except: return 0.5, 0
+
+    def _get_tabtransformer_prediction(self, df, symbol=None):
+        """Get TabTransformer prediction (NEW - Industry-Leading Attention-Based Model)."""
+        if self.tabtransformer_predictor is None: return 0.5, 0
+        last = df.iloc[-1:]
+        X = self._prepare_X(last, symbol)
+        try:
+            X_df = pd.DataFrame([X.iloc[0]]) if isinstance(X, pd.DataFrame) and len(X) > 0 else X
+            proba = self.tabtransformer_predictor.predict_proba(X_df)
+            prob_class_1 = proba[0][1] if len(proba) > 0 else 0.5
+            predicted_class = 1 if prob_class_1 > 0.5 else 0
+            return prob_class_1, predicted_class
+        except Exception as e:
+            return 0.5, 0
+
+    def _get_seq_transformer_prediction(self, df):
+        """Get sequence transformer prediction using a sliding window of historical bars."""
+        if self.seq_transformer_predictor is None: return 0.5, 0
+        try:
+            probs, _ = self.seq_transformer_predictor.predict(df)
+            prob_class_1 = probs[1]
+            predicted_class = 1 if prob_class_1 > 0.5 else 0
+            return prob_class_1, predicted_class
+        except Exception as e:
+            return 0.5, 0
 
     def _prepare_X(self, row, symbol=None):
         """
@@ -286,38 +358,58 @@ class QuantAgent:
         avg = sum(signals)/len(signals)
         return 1 if avg > 0.3 else -1 if avg < -0.3 else 0
 
-    def _ensemble_vote(self, rf_prob, ai_signal, confluence_score, lstm_pred=None, hf_pred=None):
+    def _ensemble_vote(self, rf_prob, ai_signal, confluence_score, lstm_pred=None, hf_pred=None, tabtransformer_prob=None, seq_transformer_prob=None):
         """
-        Enhanced Ensemble Voting System.
-        Combines multiple AI models with weighted voting.
+        Enhanced Ensemble Voting System with TabTransformer and Sequence Transformer.
+        Combines multiple AI models (RF, XGBoost, TabTransformer, Sequence Transformer, LSTM, HF) with weighted voting.
         Returns: (ensemble_score, agreement_count, model_votes)
         """
         votes = {
-            'rf': {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0},
-            'lstm': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0},
+            'rf': {'direction': 'NEUTRAL', 'weight': 0.10, 'confidence': 0},
+            'tabtransformer': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0},  # NEW - Higher weight
+            'seq_transformer': {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0}, # NEW - Highest weight (Sequence Attention)
+            'lstm': {'direction': 'NEUTRAL', 'weight': 0.10, 'confidence': 0},
             'hf': {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0},
-            'ai': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0},
-            'confluence': {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0}
+            'ai': {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0},
+            'confluence': {'direction': 'NEUTRAL', 'weight': 0.05, 'confidence': 0}
         }
         
         # 1. Random Forest / XGBoost Vote
         if rf_prob > 0.60:
-            votes['rf'] = {'direction': 'BUY', 'weight': 0.25, 'confidence': rf_prob}
+            votes['rf'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': rf_prob}
         elif rf_prob < 0.40:
-            votes['rf'] = {'direction': 'SELL', 'weight': 0.25, 'confidence': 1 - rf_prob}
+            votes['rf'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': 1 - rf_prob}
         else:
-            votes['rf'] = {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0.5}
+            votes['rf'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+        
+        # 2. TabTransformer Vote (NEW - Higher weight due to attention-based architecture)
+        if tabtransformer_prob is not None and tabtransformer_prob > 0:
+            if tabtransformer_prob > 0.65:  # Slightly higher threshold (better confidence)
+                votes['tabtransformer'] = {'direction': 'BUY', 'weight': 0.25, 'confidence': tabtransformer_prob}
+            elif tabtransformer_prob < 0.35:
+                votes['tabtransformer'] = {'direction': 'SELL', 'weight': 0.25, 'confidence': 1 - tabtransformer_prob}
+            else:
+                votes['tabtransformer'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+                
+        # 2b. Sequence Transformer Vote (Highest Weight due to Temporal Attention)
+        if seq_transformer_prob is not None and seq_transformer_prob > 0:
+            if seq_transformer_prob > 0.65:
+                votes['seq_transformer'] = {'direction': 'BUY', 'weight': 0.25, 'confidence': seq_transformer_prob}
+            elif seq_transformer_prob < 0.35:
+                votes['seq_transformer'] = {'direction': 'SELL', 'weight': 0.25, 'confidence': 1 - seq_transformer_prob}
+            else:
+                votes['seq_transformer'] = {'direction': 'NEUTRAL', 'weight': 0.25, 'confidence': 0.5}
             
-        # 2. LSTM Vote (if available)
+        # 3. LSTM Vote (if available)
         if lstm_pred is not None:
             if lstm_pred > 0.001:  # Bullish prediction
-                votes['lstm'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
+                votes['lstm'] = {'direction': 'BUY', 'weight': 0.15, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
             elif lstm_pred < -0.001:  # Bearish prediction
-                votes['lstm'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
+                votes['lstm'] = {'direction': 'SELL', 'weight': 0.15, 'confidence': min(abs(lstm_pred) * 100, 1.0)}
             else:
-                votes['lstm'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+                votes['lstm'] = {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0.5}
                 
-        # 3. HF Model Vote (Chronos/Lag-Llama)
+        # 4. HF Model Vote (Chronos/Lag-Llama)
         if hf_pred is not None:
             if hf_pred > 0.0003:
                 votes['hf'] = {'direction': 'BUY', 'weight': 0.15, 'confidence': 0.7}
@@ -326,22 +418,21 @@ class QuantAgent:
             else:
                 votes['hf'] = {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0.5}
                 
-        # 4. AI Signal Vote (LSTM + HF combined)
+        # 5. AI Signal Vote (LSTM + HF combined)
         if ai_signal == 1:
-            votes['ai'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': 0.75}
+            votes['ai'] = {'direction': 'BUY', 'weight': 0.15, 'confidence': 0.75}
         elif ai_signal == -1:
-            votes['ai'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': 0.75}
+            votes['ai'] = {'direction': 'SELL', 'weight': 0.15, 'confidence': 0.75}
         else:
-            votes['ai'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}
+            votes['ai'] = {'direction': 'NEUTRAL', 'weight': 0.15, 'confidence': 0.5}
             
-        # 5. Confluence Score Vote
+        # 6. Confluence Score Vote (reduced weight, now supporting role)
         if confluence_score >= 5:
-            # Direction determined by caller, assume BUY for scoring
-            votes['confluence'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+            votes['confluence'] = {'direction': 'BUY', 'weight': 0.10, 'confidence': confluence_score / 6.0}
         elif confluence_score >= 4:
-            votes['confluence'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+            votes['confluence'] = {'direction': 'BUY', 'weight': 0.10, 'confidence': confluence_score / 6.0}
         else:
-            votes['confluence'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': confluence_score / 6.0}
+            votes['confluence'] = {'direction': 'NEUTRAL', 'weight': 0.10, 'confidence': confluence_score / 6.0}
         
         # Count agreements for BUY and SELL
         buy_votes = sum(1 for v in votes.values() if v['direction'] == 'BUY')
