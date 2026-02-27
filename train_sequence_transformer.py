@@ -133,6 +133,8 @@ def train():
         
         X = df[feature_cols].copy()
         X = X.replace([np.inf, -np.inf], np.nan).fillna(X.mean())
+        # DOWNCAST to float32 immediately to halve RAM footprint before creating sequences
+        X = X.astype(np.float32)
         y = df['target'].copy().astype(int)
         
         # Build Windows
@@ -183,7 +185,7 @@ def train():
     predictor.feature_cols = feature_cols
     
     print(f"  Training for up to 50 epochs (patience 10)...")
-    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=64, verbose=True)
+    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=32, verbose=True)
     
     # Evaluation (Batch the predictions to avoid memory spikes)
     print(f"\n[STAGE 5] Validation & Evaluation")

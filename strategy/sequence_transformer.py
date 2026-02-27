@@ -170,22 +170,40 @@ class SequenceTransformerPredictor:
         """
         self.is_fitted = True
         
-        # We need to scale across the features efficiently. 
-        # Reshape to 2D -> Scale -> Reshape back to 3D
         num_samples, seq_len, num_features = X_seq.shape
         X_flat = X_seq.reshape(-1, num_features)
-        X_scaled_flat = self.scaler.fit_transform(X_flat)
+        total_rows = X_flat.shape[0]
+        
+        # Memory-efficient scaling: fit `StandardScaler` incrementally in chunks
+        chunk_size = 500_000
+        for start_idx in range(0, total_rows, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_rows)
+            # We must use partial_fit to avoid OOM
+            self.scaler.partial_fit(X_flat[start_idx:end_idx])
+            
+        # Transform incrementally as well to avoid allocating a massive contiguous scaled block
+        X_scaled_flat = np.empty_like(X_flat, dtype=np.float32)
+        for start_idx in range(0, total_rows, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_rows)
+            X_scaled_flat[start_idx:end_idx] = self.scaler.transform(X_flat[start_idx:end_idx])
+            
         X_scaled = X_scaled_flat.reshape(num_samples, seq_len, num_features)
         
         X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
         y_tensor = torch.tensor(y, dtype=torch.long)
         
-        # Validation data
+        # Validation data (Handle scaling securely in chunks if large)
         has_val = X_val_seq is not None and y_val is not None
         if has_val:
             val_samples, _, _ = X_val_seq.shape
             X_val_flat = X_val_seq.reshape(-1, num_features)
-            X_val_scaled_flat = self.scaler.transform(X_val_flat)
+            val_total_rows = X_val_flat.shape[0]
+            
+            X_val_scaled_flat = np.empty_like(X_val_flat, dtype=np.float32)
+            for start_idx in range(0, val_total_rows, chunk_size):
+                end_idx = min(start_idx + chunk_size, val_total_rows)
+                X_val_scaled_flat[start_idx:end_idx] = self.scaler.transform(X_val_flat[start_idx:end_idx])
+                
             X_val_scaled = X_val_scaled_flat.reshape(val_samples, seq_len, num_features)
             
             X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)

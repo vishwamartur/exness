@@ -85,40 +85,63 @@ class AdaptivePositionManager:
         
         # Fetch latest market data
         df = loader.get_historical_data(symbol, settings.TIMEFRAME, 100)
-        if df is None or len(df) < 50:
-            return None
-            
-        df_features = features.add_technical_features(df)
+        df_features = features.add_technical_features(df) if df is not None and len(df) >= 50 else None
         
-        # Get ML prediction for current market conditions
         try:
-            ml_prob, ml_pred = self.quant._get_rf_prediction(df_features, symbol)
+            # Prepare state for PPO RL Position Manager
+            # State: [price_change, volatility, time_in_trade, regime, portfolio_pnl]
+            direction_mult = 1.0 if position.type == 0 else -1.0
+            price_change = ((current_price - entry_price) / entry_price) * 100.0 * direction_mult
             
-            # Get trend analysis
-            trend_score = self._analyze_trend(df_features, direction)
+            if df_features is not None:
+                volatility = df_features['atr'].iloc[-1] / current_price * 100.0 if 'atr' in df_features.columns else 0.01
+                adx = df_features['adx'].iloc[-1] if 'adx' in df_features.columns else 20
+                sma20 = df_features['sma20'].iloc[-1] if 'sma20' in df_features.columns else current_price
+                sma50 = df_features['sma50'].iloc[-1] if 'sma50' in df_features.columns else current_price
+            else:
+                volatility = 0.01
+                adx = 20
+                sma20 = current_price
+                sma50 = current_price
+                
+            entry_time = position.time
+            current_time = time.time()
+            time_in_trade_minutes = (current_time - entry_time) / 60.0
             
-            # Get volatility assessment
-            volatility_score = self._assess_volatility(df_features)
+            if adx > 25:
+                base_regime = 1.0 if sma20 > sma50 else -1.0
+            else:
+                base_regime = 0.0
+            aligned_regime = base_regime * direction_mult
             
-            # Decision logic
-            action = self._make_decision(
-                position=position,
-                ml_prob=ml_prob,
-                ml_pred=ml_pred,
-                trend_score=trend_score,
-                volatility_score=volatility_score,
-                pips_pnl=pips_pnl,
-                profit=profit
-            )
+            portfolio_pnl_pct = price_change * position.volume
             
-            if action:
-                action['ticket'] = ticket
-                action['symbol'] = symbol
-                action['timestamp'] = datetime.now(timezone.utc).isoformat()
-                return action
+            state = np.array([
+                price_change, 
+                volatility, 
+                time_in_trade_minutes, 
+                aligned_regime, 
+                portfolio_pnl_pct
+            ], dtype=np.float32)
+            
+            # Get discrete action from PPO
+            from analysis.ppo_position_manager import get_ppo_manager
+            ppo_manager = get_ppo_manager()
+            ppo_action = ppo_manager.get_trade_signal(state)
+            
+            if ppo_action != "HOLD":
+                # Map PPO action string to execution action matching the old logic
+                action_type = "PARTIAL_CLOSE" if ppo_action == "REDUCE_50%" else ("EXPAND" if ppo_action == "INCREASE" else "CLOSE")
+                return {
+                    'ticket': ticket,
+                    'symbol': symbol,
+                    'action': action_type,
+                    'reason': f"PPO Agent Signal: {ppo_action} | PnL: ${profit:.2f}",
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
                 
         except Exception as e:
-            print(f"[ADAPTIVE] Error in ML analysis for {symbol}: {e}")
+            print(f"[ADAPTIVE] Error checking PPO for {symbol}: {e}")
             
         return None
     

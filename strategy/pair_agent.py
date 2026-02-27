@@ -13,7 +13,6 @@ from strategy.bos_strategy import BOSStrategy
 from utils.news_filter import is_news_blackout
 from analysis.sentiment_analyzer import get_sentiment_analyzer
 from analysis.pattern_memory import get_pattern_memory
-from analysis.rl_trader import get_rl_trader
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ class PairAgent:
         self.journal = TradeJournal()
         self.sentiment_analyzer = get_sentiment_analyzer()
         self.pattern_memory = get_pattern_memory()  # RAG for historical patterns
-        self.rl_trader = get_rl_trader()  # Reinforcement Learning agent
         
         # State
         self.is_active = True
@@ -318,19 +316,7 @@ class PairAgent:
         if rag_context['recommendation'] in ['PROCEED', 'NEUTRAL']:
             print(f"[{self.symbol}] RAG: {rag_context['context_text']}")
         
-        # RL Agent Signal
-        rl_state = self.rl_trader.extract_state(df_scan, symbol=self.symbol)
-        rl_action, rl_confidence = self.rl_trader.get_trade_signal(rl_state, confidence_threshold=0.6)
-        
-        # Check RL alignment with ensemble
-        rl_aligned = False
-        if rl_action == signal or rl_action == 'HOLD':
-            rl_aligned = True
-            print(f"[{self.symbol}] RL: {rl_action} (conf: {rl_confidence:.2f}) - Aligned")
-        elif rl_action in ['BUY', 'SELL'] and rl_action != signal:
-            print(f"[{self.symbol}] RL: {rl_action} (conf: {rl_confidence:.2f}) - Conflicts with {signal}")
-            # Reduce confidence if RL disagrees
-            prob *= 0.8
+        # Skipped internal DQN prediction logic on direction; exclusively relying on Ensemble models + PPO sizing.
         
         candidate = {
             'symbol': self.symbol,
@@ -350,9 +336,9 @@ class PairAgent:
             'sentiment': sentiment,
             'rag_context': rag_context,
             'rag_win_rate': rag_context.get('historical_win_rate', 0.5),
-            'rl_action': rl_action,
-            'rl_confidence': rl_confidence,
-            'rl_aligned': rl_aligned,
+            'rl_action': 'PPO_CONTROLLED',
+            'rl_confidence': 1.0,
+            'rl_aligned': True,
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
             'scaling_factor': 1.0,
@@ -575,32 +561,8 @@ class PairAgent:
             self.pattern_memory.update_outcome(pattern_id, outcome, pnl)
             print(f"[{self.symbol}] RAG: Updated pattern {pattern_id} -> {outcome} (${pnl:.2f})")
         
-        # RL Training: Store experience and train
-        if entry_state is not None and exit_state is not None and action_taken is not None:
-            # Map action string to index
-            action_map = {'HOLD': 0, 'BUY': 1, 'SELL': 2, 'CLOSE': 3}
-            action_idx = action_map.get(action_taken, 0)
-            
-            # Calculate reward
-            reward = self.rl_trader.calculate_reward(
-                pnl_pct=pnl,
-                holding_time=0,  # Would need actual duration
-                max_drawdown=0,  # Would need to track
-                action_taken=action_taken
-            )
-            
-            # Store experience
-            done = True  # Episode ends when trade closes
-            self.rl_trader.store_experience(entry_state, action_idx, reward, exit_state, done)
-            
-            # Train RL agent
-            loss = self.rl_trader.train_step()
-            if loss:
-                print(f"[{self.symbol}] RL: Trained on trade outcome (loss: {loss:.4f}, reward: {reward:.2f})")
-            
-            # Save model periodically
-            if random.random() < 0.1:  # 10% chance
-                self.rl_trader.save_model()
+        # Moved RL Exit Training logic entirely to the manual standalone `train_ppo_manager.py`.
+        pass
 
 def projected_time_now():
     return datetime.now(timezone.utc).timestamp()
