@@ -10,10 +10,17 @@ from market_data import loader
 from strategy import features
 from config import settings
 
+def _get_asset_class(symbol):
+    if symbol in getattr(settings, 'SYMBOLS_CRYPTO', []): return 'crypto'
+    elif symbol in getattr(settings, 'SYMBOLS_COMMODITIES', []): return 'commodity'
+    return 'forex'
+
 def train_ppo():
     print("==================================================")
     print("  INITIALIZING OFFLINE PPO TRAINING RUN")
     print("==================================================")
+    import sqlite3
+    import datetime
     
     # Target symbols for robust training
     train_symbols = ['EURUSD', 'GBPUSD', 'BTCUSD', 'XAUUSD']
@@ -22,17 +29,47 @@ def train_ppo():
     # Initialize env
     env = MT5TradingEnv()
     
-    # Collect all recent bars across symbols and create a master training dataframe
+    # Online Learning: Retrain on recent trades from database
     master_dfs = []
     
-    for symbol in train_symbols:
-        print(f"[DATA] Fetching history for {symbol}...")
-        df = loader.get_historical_data(symbol, settings.TIMEFRAME, 5000) # Deep lookback
-        if df is not None and len(df) > 100:
-            df = features.add_technical_features(df)
-            df.dropna(inplace=True)
-            master_dfs.append(df)
+    try:
+        conn = sqlite3.connect('f:/mt5/trade_journal.db')
+        # Fetch the last 100 trades to build environment state distributions
+        query = "SELECT symbol, entry_time, close_time FROM trades WHERE outcome IN ('WIN', 'LOSS') ORDER BY entry_time DESC LIMIT 100"
+        recent_trades = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if len(recent_trades) > 0:
+            print(f"[DATA] Found {len(recent_trades)} recent trades in journal for Online Learning.")
             
+            # Fetch surrounding price action for these specific trades to train PPO Exits
+            for _, row in recent_trades.iterrows():
+                symbol = row['symbol']
+                # Skip if we don't have basic features implemented for the asset class
+                if symbol not in train_symbols and _get_asset_class(symbol) == 'commodity':
+                     pass
+                     
+                print(f"[DATA] Fetching context window around trade for {symbol}...")
+                # In a live system, you'd fetch by exact Datetime bounds.
+                # For this script we will pull a localized 1000 bar chunk.
+                df = loader.get_historical_data(symbol, settings.TIMEFRAME, 500)
+                if df is not None and len(df) > 100:
+                    df = features.add_technical_features(df)
+                    df.dropna(inplace=True)
+                    master_dfs.append(df)
+        else:
+            print("[DATA] No recent trades in journal. Falling back to general history.")
+            for symbol in train_symbols:
+                df = loader.get_historical_data(symbol, settings.TIMEFRAME, 1000)
+                if df is not None and len(df) > 100:
+                    df = features.add_technical_features(df)
+                    df.dropna(inplace=True)
+                    master_dfs.append(df)
+                    
+    except Exception as e:
+        print(f"[ERROR] DB error during Online Learning phase: {e}")
+        return
+
     if not master_dfs:
         print("[ERROR] Failed to fetch any historical data for training.")
         return

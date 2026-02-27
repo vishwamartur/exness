@@ -20,7 +20,7 @@ class PPOPositionManager:
     def _load_model(self):
         if os.path.exists(MODEL_PATH) or os.path.exists(MODEL_PATH.replace('.zip', '')):
             try:
-                self.model = PPO.load(MODEL_PATH, env=self.env)
+                self.model = PPO.load(MODEL_PATH, env=self.env, device='cpu')
                 print(f"[PPO] Loaded model from {MODEL_PATH}")
             except Exception as e:
                 print(f"[PPO] Error loading model: {e}")
@@ -28,7 +28,7 @@ class PPOPositionManager:
         if self.model is None:
             # Initialize new empty model
             os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-            self.model = PPO("MlpPolicy", self.env, verbose=0)
+            self.model = PPO("MlpPolicy", self.env, verbose=0, device='cpu')
             print("[PPO] Initialized new model architecture.")
             
     def get_trade_signal(self, state: np.ndarray) -> str:

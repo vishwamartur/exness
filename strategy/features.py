@@ -90,6 +90,10 @@ def add_technical_features(df):
         # Extremes: price distance from VWAP normalized by standard deviation
         df['vwap_zscore'] = (df['close'] - df['vwap_rolling']) / df['vwap_std'].replace(0, np.nan)
         df['vwap_zscore'] = df['vwap_zscore'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Legacy LSTM compatibility columns
+        df['vwap'] = df['vwap_rolling']
+        df['dist_vwap'] = (df['close'] - df['vwap']) / df['vwap'].replace(0, np.nan)
 
         # Volume SMA anomaly detection
         df['vol_sma'] = df['tick_volume'].rolling(window=20).mean()

@@ -255,6 +255,10 @@ class AdaptivePositionManager:
         """
         Determine if we should expand a winning position.
         """
+        # Do not expand positions that are already the result of an expansion (prevents geometric ticket explosion)
+        if hasattr(position, 'magic') and position.magic == 100:
+            return False
+            
         # Check if we're already at max positions
         all_positions = self.client.get_all_positions()
         if len(all_positions) >= settings.MAX_OPEN_POSITIONS:
@@ -305,17 +309,29 @@ class AdaptivePositionManager:
             # Place new order in same direction
             cmd = mt5.ORDER_TYPE_BUY if direction == 0 else mt5.ORDER_TYPE_SELL
             tick = mt5.symbol_info_tick(symbol)
+            sym_info = mt5.symbol_info(symbol)
             
-            if not tick:
+            if not tick or not sym_info:
                 return False
                 
             price = tick.ask if direction == 0 else tick.bid
+            
+            # Snap volume to correct valid steps dynamically (fixes XAGUSD errors)
+            volume_step = sym_info.volume_step
+            add_volume = new_lot - current_lot
+            
+            # Bound addition logic to step precision
+            clipped_volume = max(sym_info.volume_min, round(add_volume / volume_step) * volume_step)
+            
+            if clipped_volume <= 0:
+                print(f"[ADAPTIVE] Invalid minimal addition calculated for {symbol}")
+                return False
             
             # Place the order
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": new_lot - current_lot,  # Only the additional amount
+                "volume": float(clipped_volume),  # Only the additional amount, properly constrained
                 "type": cmd,
                 "price": price,
                 "deviation": settings.DEVIATION,
@@ -403,15 +419,23 @@ class AdaptivePositionManager:
             cmd = mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY
             
             tick = mt5.symbol_info_tick(symbol)
-            if not tick:
+            sym_info = mt5.symbol_info(symbol)
+            
+            if not tick or not sym_info:
                 return False
                 
             price = tick.bid if position.type == 0 else tick.ask
+            volume_step = sym_info.volume_step
+            # Snap partial close math to exact valid steps
+            close_lot = max(sym_info.volume_min, round(close_lot / volume_step) * volume_step)
+            
+            if close_lot <= 0:
+                return False
             
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": close_lot,
+                "volume": float(close_lot),
                 "type": cmd,
                 "position": ticket,
                 "price": price,
