@@ -202,8 +202,20 @@ def train():
     eval_set = [(X_train, y_train), (X_test, y_test)]
     xgb_model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
     
-    # Evaluate
-    preds = xgb_model.predict(X_test)
+    # ---------------------------------------------------------
+    # PROBABILITY CALIBRATION (Platt Scaling via Sigmoid)
+    # Converts arbitrary ML float outputs to True Probabilities
+    # ---------------------------------------------------------
+    from sklearn.calibration import CalibratedClassifierCV
+    print("\nCalibrating Probabilities (Sigmoid Platt Scaling)...")
+    
+    # Wrap the fitted model to calibrate its predict_proba outputs
+    calibrated_model = CalibratedClassifierCV(xgb_model, method='sigmoid', cv="prefit")
+    calibrated_model.fit(X_test, y_test) # Calibrate on the holdout test set to prevent over-optimization
+    
+    # Evaluate using the calibrated model
+    preds = calibrated_model.predict(X_test)
+    probs = calibrated_model.predict_proba(X_test)[:, 1]
     
     report = classification_report(y_test, preds)
     cm = confusion_matrix(y_test, preds)
@@ -211,18 +223,19 @@ def train():
 
     output = []
     output.append("="*50)
-    output.append("  XGBOOST EVALUATION RESULTS (ALL PAIRS)")
+    output.append("  XGBOOST EVALUATION RESULTS (CALIBRATED)")
     output.append("="*50)
     output.append(f"Training Symbols: {len(all_data)}")
     output.append(f"Total Samples: {len(full_df)}")
     output.append(f"Accuracy: {acc:.4f}")
+    output.append(f"Calibrated Prob Mean: {probs.mean():.4f}")
     output.append(report)
     output.append(str(cm))
     
     output_str = "\n".join(output)
     print(output_str)
     
-    # Feature importance
+    # Feature importance (Must be extracted from the base estimator)
     importance = xgb_model.feature_importances_
     feature_importance = sorted(zip(feature_cols, importance), key=lambda x: x[1], reverse=True)
     
@@ -237,15 +250,15 @@ def train():
     with open("xgboost_evaluation.txt", "w") as f:
         f.write(output_str)
     
-    # Save
+    # Save the CALIBRATED model to act as the primary inference engine
     model_path = os.path.join(os.path.dirname(settings.MODEL_PATH), "xgboost_v1.pkl")
     feat_path = model_path.replace('.pkl', '_features.pkl')
     
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    joblib.dump(xgb_model, model_path)
+    joblib.dump(calibrated_model, model_path)
     joblib.dump(feature_cols, feat_path)
     
-    print(f"\nXGBoost model saved to {model_path}")
+    print(f"\nCalibrated XGBoost model saved to {model_path}")
     print(f"Features saved to {feat_path}")
 
 

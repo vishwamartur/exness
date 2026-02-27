@@ -98,6 +98,7 @@ RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 5))     # Lower frequency means higher quality selection
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 5.0)) # Hard stop if daily loss > $5
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 2))  # Max simultaneous positions to conserve free margin
+LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 15)) # Prevents stale limit gaps
 MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
@@ -201,4 +202,15 @@ LSTM_SEQ_LENGTH = 60
 
 # ─── Telegram Notifications ───────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ─── Statistical Arbitrage Settings ──────────────────────────────────────
+# Define known macro-correlated pairs to constantly monitor for divergence
+STAT_ARB_PAIRS = [("AUDUSD", "NZDUSD"), ("EURUSD", "GBPUSD"), ("XAUUSD", "XAGUSD")]
+STAT_ARB_MAX_ZSCORE = float(os.getenv("STAT_ARB_MAX_ZSCORE", 2.0)) # ±2.0 Standard Deviations triggers a hedge trade
+STAT_ARB_LOT_SIZE = float(os.getenv("STAT_ARB_LOT_SIZE", 0.01))    # Fixed micro-lot sizing for hedge legs
+
+# ─── Covariance Risk Matrix ──────────────────────────────────────────────
+# How much exposure to a single currency (e.g. USD) is allowed across the entire portfolio?
+# If buying GBPUSD pushes our net USD short exposure past MAX_PORTFOLIO_CORRELATION, block it.
+MAX_PORTFOLIO_CORRELATION = float(os.getenv("MAX_PORTFOLIO_CORRELATION", 0.75))

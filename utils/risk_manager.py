@@ -255,6 +255,11 @@ class RiskManager:
         conflict, reason = self._check_live_correlation(symbol, direction, active_positions)
         if conflict:
             return False, f"Correlation Conflict: {reason}"
+            
+        # 5c. Covariance Risk Matrix (Macro-Hedging)
+        over_exposed, covar_reason = self.calculate_portfolio_covariance(symbol, direction, active_positions)
+        if over_exposed:
+            return False, f"Covariance Matrix Guard: {covar_reason}"
 
         # 6. Profitability Check (Net Profit > Commission * Ratio)
         # Estimate cost
@@ -343,6 +348,81 @@ class RiskManager:
         except Exception:
             # Fall back to static on any error
             return check_correlation_conflict(symbol, direction, active_positions)
+        return False, ""
+        
+    def calculate_portfolio_covariance(self, new_symbol, new_direction, active_positions):
+        """
+        Covariance Risk Guard.
+        Deconstructs MT5 pairs into Quote/Base vectors to prevent 
+        massive directional exposure to a single currency (e.g. USD).
+        """
+        if not active_positions:
+            return False, ""
+            
+        currency_exposure = {}
+        
+        # 1. Parse Existing Open Positions
+        for pos in active_positions:
+            pos_symbol = pos.symbol if hasattr(pos, 'symbol') else str(pos)
+            pos_vol = pos.volume if hasattr(pos, 'volume') else 0.01  # Default fallback
+            pos_dir = 'BUY' if (hasattr(pos, 'type') and pos.type == 0) else 'SELL'
+            
+            # Simple Pair Extraction (e.g., EURUSD -> Base: EUR, Quote: USD)
+            if len(pos_symbol) >= 6:
+                base = pos_symbol[:3]
+                quote = pos_symbol[3:6]
+                
+                # If Long EURUSD -> Long EUR, Short USD
+                if pos_dir == 'BUY':
+                    currency_exposure[base] = currency_exposure.get(base, 0.0) + pos_vol
+                    currency_exposure[quote] = currency_exposure.get(quote, 0.0) - pos_vol
+                # If Short EURUSD -> Short EUR, Long USD
+                else:
+                    currency_exposure[base] = currency_exposure.get(base, 0.0) - pos_vol
+                    currency_exposure[quote] = currency_exposure.get(quote, 0.0) + pos_vol
+                    
+        # Clone current state to compare if the new trade actually helps
+        old_currency_exposure = currency_exposure.copy()
+                    
+        # 2. Add the PROPOSED trade
+        # Assume minimum lot if not passed (worst-case scalar)
+        proposed_vol = getattr(settings, 'LOT_SIZE', 0.01)
+        if len(new_symbol) >= 6:
+            base = new_symbol[:3]
+            quote = new_symbol[3:6]
+            
+            if new_direction == 'BUY':
+                currency_exposure[base] = currency_exposure.get(base, 0.0) + proposed_vol
+                currency_exposure[quote] = currency_exposure.get(quote, 0.0) - proposed_vol
+            else:
+                currency_exposure[base] = currency_exposure.get(base, 0.0) - proposed_vol
+                currency_exposure[quote] = currency_exposure.get(quote, 0.0) + proposed_vol
+                
+        # 3. Evaluate Gross Vector Concentration
+        # Normalizing to a 1.0 limit based on the Max allowable setting.
+        # e.g., if MAX_PORTFOLIO_CORRELATION is 0.75, and we reach 0.76 exposure in USD, we block.
+        max_limit = getattr(settings, 'MAX_PORTFOLIO_CORRELATION', 0.75) 
+        
+        # To normalize, we treat max_limit as a direct proxy for fractional lot caps.
+        # (Alternatively, could ratio it to the Account Balance, but lot-sum is faster)
+        # Assuming typical micro-accounts (0.01 lots), exposure > 0.03 in one direction is dangerous.
+        
+        # Because different users have different standard deviations of lot sizes, we'll bound checking 
+        # to a relative count if max_limit is < 1.0. 
+        # E.g if Limit is 0.75, assume maximum 3 concurrent directions allowed.
+        directional_cap = 0.01 * 3 # Baseline 3 positions
+        
+        for curr, new_exp in currency_exposure.items():
+            # Only block if the new_exp has GROWN beyond the cap
+            # AND its absolute magnitude makes it worse than the previous state
+            old_exp = old_currency_exposure.get(curr, 0.0)
+            
+            if abs(new_exp) > directional_cap:
+                # Did we make it worse?
+                if abs(new_exp) > abs(old_exp):
+                    side = "LONG" if new_exp > 0 else "SHORT"
+                    return True, f"Dangerously {side} on [{curr}]. Risk grows from {old_exp:.2f} to {new_exp:.2f} lots."
+
         return False, ""
 
     def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0):

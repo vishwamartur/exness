@@ -374,10 +374,12 @@ class QuantAgent:
             'confluence': {'direction': 'NEUTRAL', 'weight': 0.05, 'confidence': 0}
         }
         
-        # 1. Random Forest / XGBoost Vote
-        if rf_prob > 0.60:
+        # 1. Random Forest / XGBoost Vote (Calibrated Probability >= 0.75)
+        # Using 0.75 threshold as the probabilities are now mathematically scaled to [0, 1] 
+        # via CalibratedClassifierCV, so 0.75 directly means 75% true win likelihood.
+        if rf_prob >= 0.75:
             votes['rf'] = {'direction': 'BUY', 'weight': 0.20, 'confidence': rf_prob}
-        elif rf_prob < 0.40:
+        elif rf_prob <= 0.25:
             votes['rf'] = {'direction': 'SELL', 'weight': 0.20, 'confidence': 1 - rf_prob}
         else:
             votes['rf'] = {'direction': 'NEUTRAL', 'weight': 0.20, 'confidence': 0.5}

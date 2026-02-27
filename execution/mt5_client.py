@@ -216,7 +216,7 @@ class MT5Client:
     def place_order(self, order_type, symbol=None, volume=None, 
                     sl_price=None, tp_price=None,
                     stop_loss_pips=0, take_profit_pips=0, 
-                    limit_price=None):
+                    limit_price=None, expiration=None):
         """
         Places an order. Supports both ATR-based (sl_price/tp_price) 
         and legacy pip-based SL/TP.
@@ -243,14 +243,22 @@ class MT5Client:
         action = mt5.TRADE_ACTION_DEAL
         price_to_use = 0.0
         
-        # Determine Price
+        # Determine filling mode based on execution execution type
+        filling_mode = mt5.ORDER_FILLING_IOC
+        time_mode = mt5.ORDER_TIME_GTC
+        
+        # Determine Price & Pending Routing
         if limit_price:
             action = mt5.TRADE_ACTION_PENDING
             price_to_use = limit_price
+            filling_mode = mt5.ORDER_FILLING_RETURN # Required by MT5 for Pending
             if order_type == mt5.ORDER_TYPE_BUY:
                 order_type = mt5.ORDER_TYPE_BUY_LIMIT
             elif order_type == mt5.ORDER_TYPE_SELL:
                 order_type = mt5.ORDER_TYPE_SELL_LIMIT
+                
+            if expiration:
+                time_mode = mt5.ORDER_TIME_SPECIFIED
         else:
             price_to_use = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
 
@@ -279,9 +287,12 @@ class MT5Client:
             "deviation": self.deviation,
             "magic": 234000,
             "comment": "Institutional",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_time": time_mode,
+            "type_filling": filling_mode,
         }
+        
+        if expiration and action == mt5.TRADE_ACTION_PENDING:
+             request["expiration"] = int(expiration)
         
         result = mt5.order_send(request)
         if result.retcode != mt5.TRADE_RETCODE_DONE:

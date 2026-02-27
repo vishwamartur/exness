@@ -415,20 +415,34 @@ class InstitutionalStrategy:
         tick = mt5.symbol_info_tick(symbol)
         if not tick: return
         
-        if direction == 'BUY':
-            sl = tick.ask - sl_dist
-            tp = tick.ask + tp_dist
-            cmd = mt5.ORDER_TYPE_BUY
-            price = tick.ask
-        else:
-            sl = tick.bid + sl_dist
-            tp = tick.bid - tp_dist
-            cmd = mt5.ORDER_TYPE_SELL
-            price = tick.bid
-            
-        print(f"[{symbol}] EXECUTE {direction} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f}")
+        # -------------------------------------------------------------
+        # LIMIT ORDER EXECUTION ENGINE 
+        # Captures the Spread instead of paying it by acting as a Maker
+        # Buy Limit traps Bid price | Sell Limit traps Ask price
+        # -------------------------------------------------------------
+        from datetime import datetime, timedelta
         
-        res = self.client.place_order(cmd, symbol, lot, sl, tp)
+        # Auto-cancel stale pending liquidity after X minutes (prevents ghost limits on sudden moves)
+        exp_minutes = getattr(settings, 'LIMIT_ORDER_EXPIRATION_MINUTES', 15)
+        dt = datetime.now() + timedelta(minutes=exp_minutes)
+        expiration_ts = int(dt.timestamp())
+        
+        if direction == 'BUY':
+            limit_price = tick.bid # Sit on Bid
+            sl = limit_price - sl_dist
+            tp = limit_price + tp_dist
+            cmd = mt5.ORDER_TYPE_BUY # place_order wrapper converts to LIMIT when limit_price is given
+            price = limit_price
+        else:
+            limit_price = tick.ask # Sit on Ask
+            sl = limit_price + sl_dist
+            tp = limit_price - tp_dist
+            cmd = mt5.ORDER_TYPE_SELL 
+            price = limit_price
+            
+        print(f"[{symbol}] PENDING LIMIT {direction} @ {price:.5f} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f} | E: {exp_minutes}m")
+        
+        res = self.client.place_order(cmd, symbol, lot, sl, tp, limit_price=limit_price, expiration=expiration_ts)
         if res:
             print(f"[OK] ORDER FILLED: {symbol}")
             # Telegram alert

@@ -60,10 +60,14 @@ async def main():
     else:
         print("[DASHBOARD] dashboard/ folder not found — run 'cd dashboard && npm install' first")
 
-    # 2. Initialize Strategy
+    # 2. Initialize Strategy & Stat Arb Engine
     try:
         strategy = InstitutionalStrategy(client, on_event=push_update)
-        print("Agents Initialized.")
+        
+        from analysis.stat_arb_manager import StatArbManager
+        stat_arb = StatArbManager(client)
+        
+        print("Agents & Stat-Arb Initialized.")
     except Exception as e:
         print(f"Failed to init strategy: {e}")
         traceback.print_exc()
@@ -78,6 +82,44 @@ async def main():
             
             try:
                 await strategy.run_scan_loop()
+                
+                # --- STATISTICAL ARBITRAGE (Pairs Trading) ---
+                print(f"[STAT-ARB] Evaluating {len(settings.STAT_ARB_PAIRS)} Cointegrated Hedging Pairs...")
+                for symbol_A, symbol_B in settings.STAT_ARB_PAIRS:
+                    # 1. Fetch minimum rolling 100 bars for OLS regression math
+                    # Use H1 timeframe for arb to filter out microstructure noise and focus on macro divergence
+                    from market_data import loader
+                    df_A = loader.get_historical_data(symbol_A, "H1", 200)
+                    df_B = loader.get_historical_data(symbol_B, "H1", 200)
+                    
+                    # 2. Analyze Pair
+                    # Generates a Signal if Z-Score drifts beyond +-2 standard deviations
+                    signal = stat_arb.analyze_pair(symbol_A, symbol_B, df_A, df_B)
+                    
+                    if signal:
+                        action = signal.get("action")
+                        
+                        if action == "OPEN_SPREAD":
+                            stat_arb.execute_spread_trade(
+                                symbol_A, symbol_B, 
+                                signal["direction_A"], signal["direction_B"], 
+                                signal["hedge_ratio"]
+                            )
+                            # Alert UI
+                            push_update({
+                                "type": "STAT_ARB_HEDGE",
+                                "symbol": f"{symbol_A}/{symbol_B}",
+                                "message": f"Deploying Z={signal['z_score']:.2f} Delta-Neutral Spread"
+                            })
+                            
+                        elif action == "CLOSE_SPREAD":
+                            stat_arb.close_spread_trade(symbol_A, symbol_B)
+                            push_update({
+                                "type": "STAT_ARB_FLATTEN",
+                                "symbol": f"{symbol_A}/{symbol_B}",
+                                "message": f"Reversion! Z={signal['z_score']:.2f} Spread Flattened"
+                            })
+                            
             except Exception as e:
                 print(f"[ERROR] Scan loop failed: {e}")
                 traceback.print_exc()
