@@ -414,19 +414,34 @@ class RiskManager:
 
         return False, ""
 
-    def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0):
+    def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0, ml_prob=None):
         """
         Calculates dynamic lot size using Quarter-Kelly when history available.
         Falls back to confluence tiers when insufficient trade history.
+        
+        ml_prob: float (0-1) — ML ensemble predicted win probability.
+                 When provided, blends with historical win rate for smarter sizing.
         """
         # ── Kelly Criterion ──────────────────────────────────────────────────
         kelly_risk_pct = None
         if getattr(settings, 'USE_KELLY', False):
             stats = self.symbol_stats.get(symbol, {})
-            win_rate = stats.get('win_rate', 0)
+            hist_win_rate = stats.get('win_rate', 0)
             avg_win  = stats.get('avg_win', 0)
             avg_loss = stats.get('avg_loss', 0)
             count    = stats.get('count', 0)
+
+            # Blend historical win rate with ML prediction if available
+            # ML-weighted (70%) when confident, historical (30%) for stability
+            if ml_prob is not None and ml_prob > 0:
+                if count >= settings.KELLY_MIN_TRADES and hist_win_rate > 0:
+                    # Blend: 70% ML prediction + 30% historical
+                    win_rate = (ml_prob * 0.7) + (hist_win_rate * 0.3)
+                else:
+                    # No history — use ML directly but apply conservative discount
+                    win_rate = ml_prob * 0.8  # 20% haircut for safety
+            else:
+                win_rate = hist_win_rate
 
             if count >= settings.KELLY_MIN_TRADES and avg_loss > 0 and avg_win > 0:
                 rr = avg_win / avg_loss           # reward-to-risk ratio
@@ -435,6 +450,18 @@ class RiskManager:
                 kelly_risk_pct = min(
                     kelly_f * settings.KELLY_FRACTION * 100,  # quarter-Kelly → %
                     settings.MAX_RISK_PERCENT                  # hard cap
+                )
+            elif ml_prob is not None and ml_prob > 0.6:
+                # Even without trade history, use ML-only Kelly with conservative defaults
+                # Assume R:R from ATR settings as proxy
+                atr_tp = getattr(settings, 'ATR_TP_MULTIPLIER', 4.0)
+                atr_sl = getattr(settings, 'ATR_SL_MULTIPLIER', 2.0)
+                rr = atr_tp / atr_sl if atr_sl > 0 else 2.0
+                kelly_f = (ml_prob * 0.8) - (1 - ml_prob * 0.8) / rr
+                kelly_f = max(0.0, kelly_f)
+                kelly_risk_pct = min(
+                    kelly_f * settings.KELLY_FRACTION * 100,
+                    settings.MAX_RISK_PERCENT
                 )
 
         # ── Confluence Tier Fallback ─────────────────────────────────────────

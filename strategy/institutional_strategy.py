@@ -410,7 +410,10 @@ class InstitutionalStrategy:
             return
 
         # Sizing
-        lot = self.risk_manager.calculate_position_size(symbol, sl_dist, score, setup['scaling_factor'])
+        lot = self.risk_manager.calculate_position_size(
+            symbol, sl_dist, score, setup['scaling_factor'],
+            ml_prob=setup.get('ml_prob')
+        )
         
         tick = mt5.symbol_info_tick(symbol)
         if not tick: return
