@@ -13,6 +13,7 @@ from strategy.bos_strategy import BOSStrategy
 from utils.news_filter import is_news_blackout
 from analysis.sentiment_analyzer import get_sentiment_analyzer
 from analysis.pattern_memory import get_pattern_memory
+from analysis.institutional_flow_detector import get_institutional_flow_detector
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class PairAgent:
         self.journal = TradeJournal()
         self.sentiment_analyzer = get_sentiment_analyzer()
         self.pattern_memory = get_pattern_memory()  # RAG for historical patterns
+        self.flow_detector = get_institutional_flow_detector()  # Smart Money tracker
         
         # State
         self.is_active = True
@@ -158,6 +160,12 @@ class PairAgent:
             self.latest_atr = q_res['features']['atr']
             self.last_atr_time = projected_time_now()
             
+        # 1.5. Institutional Flow Analysis (Smart Money Tracking)
+        inst_flow = {'score': 0, 'direction': 'NEUTRAL', 'should_boost': False, 'details': {}}
+        if getattr(settings, 'INST_FLOW_ENABLE', False):
+            inst_flow = self.flow_detector.analyze(self.symbol, data_dict)
+            print(f"[{self.symbol}] Inst Flow: score={inst_flow['score']}, dir={inst_flow['direction']}")
+
         # 2. Market Regime Analysis
         # Use DF with features from QuantAgent
         df_scan = q_res.get('data')
@@ -205,6 +213,12 @@ class PairAgent:
         # AI-Powered Market Regime Filter (Enhanced)
         signal = q_res.get('direction', 'NEUTRAL')
         
+        # Institutional Flow Filter: block trades against strong institutional flow
+        if getattr(settings, 'INST_FLOW_ENABLE', False) and inst_flow['score'] > 0:
+            should_block, block_reason = self.flow_detector.should_block_trade(signal, inst_flow)
+            if should_block:
+                return None, f"Inst Flow Block: {block_reason}"
+        
         # Get detailed regime classification
         from analysis.regime import RegimeDetector
         regime_detector = RegimeDetector()
@@ -217,8 +231,8 @@ class PairAgent:
         # Score regime alignment with trade direction
         regime_score, regime_reason = regime_detector.get_regime_score(regime_type, signal)
         
-        # Require minimum regime score for the direction (lowered from 5 to 2 to allow more trades)
-        if regime_score < 2:
+        # Require minimum regime score for the direction (STRICT: raised from 2 to 4)
+        if regime_score < 4:
             return None, f"Weak Regime ({regime_type}: {regime_score}/10) - {regime_reason}"
         
         # Log regime info for debugging
@@ -290,17 +304,30 @@ class PairAgent:
             score = min(6, score + 1)  # Boost score by 1 (max 6)
             print(f"[{self.symbol}] Pattern boost: +1 score (confidence: {pattern_confidence:.2f})")
         
-        # News Sentiment Analysis
-        sentiment = self.sentiment_analyzer.get_sentiment_recommendation({'score': 0})  # Placeholder
-        # In async context, we'd use: sentiment = await self.sentiment_analyzer.get_sentiment(self.symbol)
-        
-        # Check sentiment alignment
-        sentiment_aligned = self.sentiment_analyzer.should_trade_with_sentiment(
-            self.symbol, signal, {'score': 0, 'confidence': 0}  # Placeholder - integrate real sentiment
-        )
-        
-        if not sentiment_aligned:
-            return None, f"Sentiment Conflict - News sentiment against {signal}"
+        # News Sentiment Analysis (Gemini AI-Powered)
+        try:
+            from analysis.gemini_news_analyzer import get_gemini_analyzer
+            gemini = get_gemini_analyzer()
+            if gemini.is_available():
+                sentiment_data = await gemini.analyze(self.symbol)
+                
+                # Check if Gemini strongly contradicts the trade direction
+                should_block, block_reason = gemini.should_block_trade(signal, sentiment_data)
+                if should_block:
+                    return None, f"Gemini News Block: {block_reason}"
+                    
+                # Also check via sentiment analyzer alignment
+                sentiment_aligned = self.sentiment_analyzer.should_trade_with_sentiment(
+                    self.symbol, signal, sentiment_data
+                )
+                if not sentiment_aligned:
+                    return None, f"Sentiment Conflict - {sentiment_data.get('direction_bias', 'N/A')} vs {signal}"
+            else:
+                # Gemini unavailable — continue without news filter
+                pass
+        except Exception as e:
+            # Don't block trades on sentiment errors
+            print(f"[{self.symbol}] Sentiment analysis error (non-blocking): {e}")
         
         # RAG: Retrieve similar historical patterns
         rag_context = self.pattern_memory.get_pattern_context(df_scan, self.symbol, signal)
@@ -318,6 +345,16 @@ class PairAgent:
         
         # Skipped internal DQN prediction logic on direction; exclusively relying on Ensemble models + PPO sizing.
         
+        # Institutional Flow Boost: boost score if flow aligns with trade direction
+        inst_scale = 1.0
+        if getattr(settings, 'INST_FLOW_ENABLE', False) and inst_flow.get('should_boost', False):
+            flow_dir = inst_flow.get('direction', 'NEUTRAL')
+            trade_flow = 'BULLISH' if signal == 'BUY' else 'BEARISH'
+            if flow_dir == trade_flow:
+                score = min(6, score + 1)  # Boost score by 1
+                inst_scale = self.flow_detector.get_position_scale(signal, inst_flow)
+                print(f"[{self.symbol}] Inst Flow boost: +1 score, scale={inst_scale}x (flow={flow_dir}, score={inst_flow['score']})")
+
         candidate = {
             'symbol': self.symbol,
             'direction': signal,
@@ -336,12 +373,15 @@ class PairAgent:
             'sentiment': sentiment,
             'rag_context': rag_context,
             'rag_win_rate': rag_context.get('historical_win_rate', 0.5),
+            'inst_flow_score': inst_flow.get('score', 0),
+            'inst_flow_direction': inst_flow.get('direction', 'NEUTRAL'),
+            'inst_flow_details': inst_flow.get('details', {}),
             'rl_action': 'PPO_CONTROLLED',
             'rl_confidence': 1.0,
             'rl_aligned': True,
             'sl_distance': sl_dist,
             'tp_distance': tp_dist,
-            'scaling_factor': 1.0,
+            'scaling_factor': inst_scale,
             'm5_trend': q_res.get('m5_trend', 0),  # Log M5 for journal
             'details': q_res.get('details', {}),
             'features': q_res.get('features', {}),

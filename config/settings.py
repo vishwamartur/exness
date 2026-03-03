@@ -97,7 +97,7 @@ COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 1 minute between t
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 5))     # Lower frequency means higher quality selection
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 5.0)) # Hard stop if daily loss > $5
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 20))  # Increased from 2 to 20 to allow more trades
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 3))  # Strict: 3 max for micro-account safety
 LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 15)) # Prevents stale limit gaps
 MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
@@ -188,6 +188,14 @@ BOS_MAX_SPREAD_RATIO = 0.15      # Spread max 15% of SL capability
 BOS_HUNTING_HOURS = [8, 9, 10, 13, 14, 15] # Strict London/NY Open hours
 BOS_MIN_RISK_REWARD = 2.5       # Asymmetric Payoff for Retail
 NEWS_FILTER_ENABLE = True       # Enable High-Impact News Avoidance
+
+# ─── Institutional Flow Tracking (Smart Money) ───────────────────────────
+INST_FLOW_ENABLE = os.getenv("INST_FLOW_ENABLE", "True").lower() == "true"
+INST_FLOW_MIN_SCORE = int(os.getenv("INST_FLOW_MIN_SCORE", 60))           # Min score to boost trade
+INST_FLOW_BLOCK_SCORE = int(os.getenv("INST_FLOW_BLOCK_SCORE", 70))       # Score to block counter-flow trades
+INST_FLOW_VOLUME_ZSCORE_THRESHOLD = float(os.getenv("INST_FLOW_VOLUME_ZSCORE_THRESHOLD", 2.0))
+INST_FLOW_ABSORPTION_THRESHOLD = float(os.getenv("INST_FLOW_ABSORPTION_THRESHOLD", 0.3))
+INST_FLOW_DISPLACEMENT_MULTIPLIER = float(os.getenv("INST_FLOW_DISPLACEMENT_MULTIPLIER", 3.0))
 
 # Lag-Llama Settings
 USE_LAG_LLAMA = False # os.getenv("USE_LAG_LLAMA", "True").lower() == "true"
