@@ -304,11 +304,13 @@ class PairAgent:
             print(f"[{self.symbol}] Pattern boost: +1 score (confidence: {pattern_confidence:.2f})")
         
         # News Sentiment Analysis (Gemini AI-Powered)
+        sentiment = 'NEUTRAL'  # Default before Gemini analysis
         try:
             from analysis.gemini_news_analyzer import get_gemini_analyzer
             gemini = get_gemini_analyzer()
             if gemini.is_available():
                 sentiment_data = await gemini.analyze(self.symbol)
+                sentiment = sentiment_data.get('direction_bias', 'NEUTRAL')
                 
                 # Check if Gemini strongly contradicts the trade direction
                 should_block, block_reason = gemini.should_block_trade(signal, sentiment_data)
