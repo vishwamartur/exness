@@ -112,7 +112,48 @@ def add_technical_features(df):
         df['delta_vol_ratio'] = df['delta_vol'] / df['tick_volume'].replace(0, np.nan)  # (-1 to +1)
         # Normalised flow: > 0 means net buying, < 0 net selling pressure
         df['delta_vol_ratio'] = df['delta_vol_ratio'].fillna(0)
-        
+
+        # ─── 5b. Institutional Flow Features ─────────────────────────────────
+        # These features help ML models learn institutional order flow patterns.
+
+        # i. Volume Z-Score: how unusual is current volume? (>2 = institutional)
+        vol_mean_50 = df['tick_volume'].rolling(window=50, min_periods=10).mean()
+        vol_std_50 = df['tick_volume'].rolling(window=50, min_periods=10).std()
+        df['inst_volume_zscore'] = ((df['tick_volume'] - vol_mean_50) / vol_std_50.replace(0, np.nan)).fillna(0)
+
+        # ii. Absorption Score: high volume + small body = stealth accumulation/distribution
+        candle_body = (df['close'] - df['open']).abs()
+        candle_range_full = (df['high'] - df['low']).replace(0, np.nan)
+        body_range_ratio = candle_body / candle_range_full
+        vol_rel = df['tick_volume'] / vol_mean_50.replace(0, np.nan)
+        # Absorption = high vol ratio * inverted body ratio (small body = high absorption)
+        df['inst_absorption_score'] = (vol_rel.fillna(1) * (1 - body_range_ratio.fillna(0.5))).clip(0, 5)
+
+        # iii. Displacement: large body candles signaling institutional intent
+        avg_body = candle_body.rolling(window=20, min_periods=5).mean()
+        df['inst_displacement'] = (candle_body > 3.0 * avg_body).astype(int)
+
+        # iv. CVD at 20 and 50 bar windows (Cumulative Volume Delta)
+        df['cvd_20'] = df['delta_vol'].rolling(window=20, min_periods=5).sum()
+        df['cvd_50'] = df['delta_vol'].rolling(window=50, min_periods=10).sum()
+
+        # v. CVD-Price Divergence: CVD direction vs price direction
+        price_change_20 = df['close'] - df['close'].shift(20)
+        cvd_sign = np.sign(df['cvd_20'])
+        price_sign = np.sign(price_change_20)
+        df['cvd_divergence'] = (cvd_sign != price_sign).astype(int)
+
+        # vi. Smart Money Index: weighted composite (0-1 normalized)
+        # Combines volume zscore signal + absorption + displacement + CVD strength
+        vol_signal = df['inst_volume_zscore'].clip(0, 4) / 4.0  # 0-1
+        abs_signal = df['inst_absorption_score'].clip(0, 3) / 3.0  # 0-1
+        disp_signal = df['inst_displacement'].astype(float)  # 0 or 1
+        cvd_norm = (df['cvd_20'] / df['tick_volume'].rolling(window=20, min_periods=5).sum().replace(0, np.nan)).fillna(0).abs().clip(0, 1)
+        df['smart_money_index'] = (vol_signal * 0.25 + abs_signal * 0.30 + disp_signal * 0.20 + cvd_norm * 0.25).clip(0, 1)
+
+        # vii. Institutional Aggression: ratio of displacement candles in last 10 bars
+        df['inst_aggression_ratio'] = df['inst_displacement'].rolling(window=10, min_periods=1).mean()
+
     # ─── 6. Bid-Ask Spread Dynamics ───────────────────────────────────────
     if 'spread' in df.columns:
         df['spread_sma'] = df['spread'].rolling(window=20).mean()

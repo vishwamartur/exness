@@ -261,46 +261,35 @@ class RiskManager:
         if over_exposed:
             return False, f"Covariance Matrix Guard: {covar_reason}"
 
-        # 6. Profitability Check (Net Profit > Commission * Ratio)
-        # Estimate cost
-        # We need point value. 
-        # For major FX, 1 lot = $10 per pip. 
-        # Commission = $7.
-        # We need to ensure (TP - Entry) * PipValue > Commission * 2
-        
+        # 6. Cost-Aware Profitability Gate (Strict)
+        # Reject any trade where total cost (spread + commission) exceeds 30% of expected profit.
         try:
-            # Simple approximation if client not available or for speed
             tick = mt5.symbol_info_tick(symbol)
             if tick:
-                # Calculate spread cost
                 spread = (tick.ask - tick.bid)
-                
-                # Gross Profit (Approximate)
                 entry = tick.ask if direction == "BUY" else tick.bid
                 gross_profit_points = abs(tp - entry)
-                
-                # Check Ratio
-                # We normalize everything to points/pips to avoid currency conversion complex logic here
-                # Commision in pips approx: $7 / $10 = 0.7 pips. 
-                # Spread = X pips.
-                # Cost = 0.7 + Spread.
                 
                 point = tick.point
                 if point == 0: point = 0.00001
                 
-                spread_points = spread / point
-                comm_points = (settings.COMMISSION_PER_LOT / 10.0) if "JPY" not in symbol else (settings.COMMISSION_PER_LOT / 1000.0) 
-                # JPY 1 lot = 1000 units? No 100,000. 1 pip = 1000 JPY approx $7?
-                # Let's use a safe simplified buffer: Cost = 2.0 pips (Spread+Comm).
-                
-                cost_pips = spread_points + 1.0 # Buffer for commission
+                spread_pips = spread / point
+                # Commission buffer: ~0.7 pips for Raw Spread accounts
+                commission_pips = 1.0
+                total_cost_pips = spread_pips + commission_pips
                 profit_pips = gross_profit_points / point
                 
-                net_pips = profit_pips - cost_pips
-                
-                if net_pips < (cost_pips * settings.MIN_NET_PROFIT_RATIO):
-                     return False, f"Low Profitability (Net {net_pips:.1f} pips < Cost {cost_pips:.1f} * {settings.MIN_NET_PROFIT_RATIO})"
-                     
+                # STRICT: Cost must NOT exceed 30% of planned profit
+                cost_ratio = total_cost_pips / max(profit_pips, 0.01)
+                if cost_ratio > 0.30:
+                    return False, f"Cost Too High ({cost_ratio*100:.0f}% of TP | Cost:{total_cost_pips:.1f} vs Profit:{profit_pips:.1f} pips)"
+                    
+                # STRICT: Net profit must be at least 3x the cost
+                net_pips = profit_pips - total_cost_pips
+                min_net = total_cost_pips * settings.MIN_NET_PROFIT_RATIO
+                if net_pips < min_net:
+                    return False, f"Low Net Profit ({net_pips:.1f} < {min_net:.1f} pips)"
+                    
         except Exception as e:
             pass # Don't block on calculation error
             

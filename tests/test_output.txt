@@ -1,0 +1,123 @@
+python : Traceback (most recent call last):
+At line:1 char:32
++ ... NCODING='utf-8'; python 
+tests\test_institutional_flow.py 2>&1 | 
+Out-F ...
++                      
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified:  
+   (Traceback (most recent call last)::Stri  
+  ng) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandE 
+   rror
+ 
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 366, in <module>
+    test_fn()
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 129, in test_volume_anomalies
+    assert vol_spike['volume_ratio'] > 2.0, 
+f"Expected volume ratio > 2.0, got 
+{vol_spike['volume_ratio']}"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Expected volume ratio > 2.0, 
+got 0.67
+Traceback (most recent call last):
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 366, in <module>
+    test_fn()
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 184, in test_displacement
+    assert disp_bull['recent_count'] >= 1, 
+"Expected displacement candles in 
+displacement_bull data"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Expected displacement 
+candles in displacement_bull data
+Traceback (most recent call last):
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 366, in <module>
+    test_fn()
+  File 
+"F:\mt5\tests\test_institutional_flow.py", 
+line 247, in test_composite_score
+    assert bull_result['score'] > 
+normal_result['score'], \
+           
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Bullish displacement score 
+(7) should be higher than normal (13)
+============================================================
+  INSTITUTIONAL FLOW DETECTOR -- TEST SUITE
+============================================================
+
+============================================================
+TEST 1: Volume Anomaly Detection
+============================================================
+[SETTINGS] TIMEFRAME set to: M15
+  Normal data: zscore=0.22, spike=False
+  Spike data: zscore=-0.43, spike=False, spike_count=1, ratio=0.67
+  [FAIL]: Expected volume ratio > 2.0, got 0.67
+
+============================================================
+TEST 2: Absorption Candle Detection
+============================================================
+  Accumulation: absorption=False, count=4, bias=BULLISH, body_ratio=0.459
+  Distribution: absorption=False, count=0, bias=NEUTRAL
+  [PASS]: Absorption candles correctly detected
+
+============================================================
+TEST 3: Displacement Candle Detection
+============================================================
+  Normal data: displacement=False, body_mult=0.05, count=0
+  Bullish Disp: displacement=False, direction=NEUTRAL, body_mult=0.82, count=0
+  [FAIL]: Expected displacement candles in displacement_bull data
+
+============================================================
+TEST 4: CVD Analysis
+============================================================
+  Bullish data CVD: cvd_20=-0.062, direction=NEUTRAL, divergence=NONE
+  Bearish data CVD: cvd_20=-0.062, direction=NEUTRAL, divergence=NONE
+  [PASS]: CVD analysis functional
+
+============================================================
+TEST 5: Composite Institutional Score
+============================================================
+  Normal: score=13, direction=BEARISH
+  Bullish: score=7, direction=NEUTRAL
+  Accumulation: score=25, direction=NEUTRAL
+  [FAIL]: Bullish displacement score (7) should be higher than normal (13)
+
+============================================================
+TEST 6: Trade Blocking Logic
+============================================================
+  BUY vs BULLISH flow (85): block=False -- Trade aligned with institutional BULLISH flow
+  SELL vs BULLISH flow (85): block=True -- Strong institutional BULLISH flow (score: 85/100) conflicts with SELL trade
+  SELL vs weak BULLISH flow (30): block=False -- Institutional flow too weak to determine
+  [PASS]: Trade blocking logic correct
+
+============================================================
+TEST 7: Position Scaling
+============================================================
+  BUY + BULLISH 85: scale=1.5x
+  BUY + BULLISH 65: scale=1.2x
+  SELL + BULLISH 85: scale=1.0x
+  [PASS]: Position scaling correct
+
+============================================================
+TEST 8: Edge Cases
+============================================================
+  Empty data: score=0, dir=NEUTRAL
+  No volume: score=0, dir=NEUTRAL
+  Short data (20 bars): score=0, dir=NEUTRAL
+  [PASS]: Edge cases handled correctly
+
+============================================================
+  RESULTS: 5/8 tests passed
+  3 tests FAILED
+============================================================
