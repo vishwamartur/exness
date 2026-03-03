@@ -29,48 +29,7 @@ from execution.mt5_client import MT5Client
 import warnings
 warnings.filterwarnings('ignore')
 
-def apply_atr_barrier(df, atr_tp_mult=3.0, atr_sl_mult=1.5, time_horizon=20):
-    """
-    Labels data using ATR-based barriers (matches live trading logic).
-    """
-    labels = []
-    atr = df['atr'].values if 'atr' in df.columns else None
-    
-    if atr is None:
-        print("Warning: ATR column not found, falling back to fixed barriers")
-        return pd.Series([0]*len(df), index=df.index)
-    
-    for i in range(len(df)):
-        if i + time_horizon >= len(df):
-            labels.append(0)
-            continue
-        
-        if atr[i] <= 0:
-            labels.append(0)
-            continue
-        
-        entry_price = df['close'].iloc[i]
-        tp_dist = atr[i] * atr_tp_mult
-        sl_dist = atr[i] * atr_sl_mult
-        
-        future_window = df.iloc[i+1 : i+1+time_horizon]
-        hit_tp = False
-        hit_sl = False
-        
-        for j in range(len(future_window)):
-            high = future_window['high'].iloc[j]
-            low = future_window['low'].iloc[j]
-            
-            if high >= entry_price + tp_dist:
-                hit_tp = True
-                break
-            if low <= entry_price - sl_dist:
-                hit_sl = True
-                break
-        
-        labels.append(1 if hit_tp and not hit_sl else 0)
-    
-    return pd.Series(labels, index=df.index)
+from utils.triple_barrier import apply_triple_barrier as apply_atr_barrier
 
 def create_sequences(X, y, seq_length=60):
     """

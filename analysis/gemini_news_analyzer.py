@@ -10,12 +10,13 @@ Returns structured sentiment scores that feed into the pre-trade decision pipeli
 import os
 import json
 import time
-import asyncio
+from utils.async_utils import run_in_executor
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -46,27 +47,27 @@ class GeminiNewsAnalyzer:
 
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self.model = None
+        self.client = None
+        self.model_id = "gemini-2.0-flash"
         self.cache = {}  # {symbol: (timestamp, result)}
         self.cache_ttl = 900  # 15 minutes — avoid API spam
         self._initialized = False
 
         if GEMINI_AVAILABLE and self.api_key:
             try:
-                genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel("gemini-flash-latest")
+                self.client = genai.Client(api_key=self.api_key)
                 self._initialized = True
-                print("[GEMINI] News Analyzer initialized (gemini-flash-latest)")
+                print(f"[GEMINI] News Analyzer initialized ({self.model_id})")
             except Exception as e:
                 print(f"[GEMINI] Init failed: {e}")
         else:
             if not GEMINI_AVAILABLE:
-                print("[GEMINI] google-generativeai not installed. News AI disabled.")
+                print("[GEMINI] google-genai not installed. News AI disabled.")
             elif not self.api_key:
                 print("[GEMINI] No API key. News AI disabled.")
 
     def is_available(self) -> bool:
-        return self._initialized and self.model is not None
+        return self._initialized and self.client is not None
 
     async def analyze(self, symbol: str) -> Dict:
         """
@@ -83,9 +84,8 @@ class GeminiNewsAnalyzer:
                 return cached_data
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._call_gemini, symbol
-            )
+            # Use shared executor to avoid blocking the event loop
+            result = await run_in_executor(self._call_gemini, symbol)
             # Cache the result
             self.cache[symbol] = (time.time(), result)
             return result
@@ -94,7 +94,7 @@ class GeminiNewsAnalyzer:
             return self._neutral_response(symbol, f"API error: {str(e)[:50]}")
 
     def _call_gemini(self, symbol: str) -> Dict:
-        """Synchronous Gemini API call."""
+        """Synchronous Gemini API call using the new google-genai SDK."""
         context = PAIR_CONTEXT.get(symbol, {
             "base": symbol[:3], "quote": symbol[3:6],
             "economies": "Global", "drivers": "price action, macro events"
@@ -130,9 +130,10 @@ IMPORTANT RULES:
 - Consider both fundamental AND sentiment factors"""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
                     temperature=0.1,  # Low temperature for consistent analysis
                     max_output_tokens=500,
                 )
@@ -162,7 +163,7 @@ IMPORTANT RULES:
                 "key_events": data.get("key_events", [])[:5],
                 "risk_level": data.get("risk_level", "MEDIUM"),
                 "reasoning": data.get("reasoning", ""),
-                "source": "gemini-2.0-flash",
+                "source": self.model_id,
                 "symbol": symbol,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
@@ -172,11 +173,8 @@ IMPORTANT RULES:
 
             return result
 
-        except json.JSONDecodeError as e:
-            print(f"[GEMINI] JSON parse error for {symbol}: {e}")
-            return self._neutral_response(symbol, "JSON parse error")
         except Exception as e:
-            print(f"[GEMINI] API call failed for {symbol}: {e}")
+            print(f"[GEMINI] API call/parse failed for {symbol}: {e}")
             return self._neutral_response(symbol, str(e)[:50])
 
     def _neutral_response(self, symbol: str, reason: str = "") -> Dict:

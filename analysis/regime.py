@@ -1,19 +1,32 @@
 """
 Market Regime Detector - AI-Powered
 Classifies market into detailed regimes using ML-style classification.
+Enhanced with Hidden Markov Model (HMM) for probabilistic regime detection.
 """
 import pandas as pd
 import numpy as np
 
+try:
+    from analysis.hmm_regime import HMMRegimeDetector, HMM_AVAILABLE as HMMLEARN_AVAILABLE
+except ImportError:
+    HMMLEARN_AVAILABLE = False
+
 class RegimeDetector:
-    def __init__(self):
+    def __init__(self, use_hmm: bool = True):
         self.regime_history = []
         self.max_history = 100
+        self.use_hmm = use_hmm and HMMLEARN_AVAILABLE
+        if use_hmm and not HMMLEARN_AVAILABLE:
+            print("[REGIME] Warning: HMM requested but hmmlearn is not installed. Using rule-based detection.")
+        self._hmm = HMMRegimeDetector() if self.use_hmm else None
 
     def get_regime(self, df):
         """
         AI-Powered Market Regime Classification.
         Returns: (regime_type: str, details: dict)
+        
+        Uses HMM probabilistic detection as primary method,
+        falls back to rule-based classification if HMM fails.
         
         Regimes:
         - TRENDING_BULL: Strong uptrend (ADX > 25, price > EMAs)
@@ -27,6 +40,21 @@ class RegimeDetector:
         """
         if df is None or len(df) < 50:
             return "NORMAL", {}
+
+        # Try HMM-based detection first (probabilistic)
+        if self.use_hmm and self._hmm is not None:
+            hmm_regime, hmm_details = self._hmm.get_regime(df)
+            if hmm_details.get('hmm', False):
+                # HMM succeeded — use it if confidence is reasonable
+                confidence = hmm_details.get('regime_confidence', 0)
+                if confidence > 0.4:
+                    # Store in history
+                    self.regime_history.append(hmm_regime)
+                    if len(self.regime_history) > self.max_history:
+                        self.regime_history = self.regime_history[-self.max_history:]
+                    return hmm_regime, hmm_details
+
+        # Fallback: Rule-based detection
 
         last = df.iloc[-1]
         prev = df.iloc[-5] if len(df) >= 5 else last
