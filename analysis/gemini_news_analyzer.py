@@ -10,7 +10,7 @@ Returns structured sentiment scores that feed into the pre-trade decision pipeli
 import os
 import json
 import time
-import asyncio
+from utils.async_utils import run_in_executor
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -84,11 +84,8 @@ class GeminiNewsAnalyzer:
                 return cached_data
 
         try:
-            # We use the sync client with executor to avoid blocking the event loop
-            # The new SDK is primarily synchronous but we wrap it.
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._call_gemini, symbol
-            )
+            # Use shared executor to avoid blocking the event loop
+            result = await run_in_executor(self._call_gemini, symbol)
             # Cache the result
             self.cache[symbol] = (time.time(), result)
             return result
