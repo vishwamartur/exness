@@ -14,11 +14,14 @@ predict() is cheap and called on every get_regime() invocation.
 Falls back to rule-based detection if HMM fitting fails or insufficient data.
 """
 
+import logging
 import time as _time
 import numpy as np
 import pandas as pd
 import warnings
 from typing import Tuple, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from hmmlearn.hmm import GaussianHMM
@@ -59,9 +62,11 @@ class HMMRegimeDetector:
         # ── Caching / throttle ─────────────────────────────────────────────
         self._refit_interval = refit_interval   # seconds between refits
         self._min_new_bars = min_new_bars       # min new bars before refit
-        self._last_fit_ts: float = 0.0          # epoch of last fit()
+        self._last_fit_ts: float = 0.0          # monotonic time of last fit()
         self._last_fit_len: int = 0             # len(obs) at last fit()
         self._last_obs: Optional[np.ndarray] = None  # cached observations
+        self._total_bars_seen: int = 0          # cumulative bar counter
+        self._bars_at_last_fit: int = 0         # _total_bars_seen at last fit
 
     # ===================================================================
     #  PUBLIC: get_regime  (cheap — uses cached model)
@@ -86,6 +91,9 @@ class HMMRegimeDetector:
             if obs is None or len(obs) < 60:
                 return "NORMAL", {"hmm": False, "reason": "feature_extraction_failed"}
 
+            # Track cumulative bars (len(df) grows as market moves)
+            self._total_bars_seen = len(df)
+
             # Fit only when needed (time elapsed or enough new bars)
             self._maybe_fit(obs)
 
@@ -95,8 +103,13 @@ class HMMRegimeDetector:
             # Predict is cheap — just a forward pass
             return self._predict(obs)
 
+        except (ValueError, TypeError) as e:
+            # Expected errors from data issues or shape mismatches
+            return "NORMAL", {"hmm": False, "reason": f"hmm_data_error: {str(e)[:80]}"}
         except Exception as e:
-            return "NORMAL", {"hmm": False, "reason": f"hmm_error: {str(e)[:60]}"}
+            # Unexpected errors — log full trace for debugging
+            logger.exception("HMM regime detection failed unexpectedly")
+            return "NORMAL", {"hmm": False, "reason": f"hmm_error: {type(e).__name__}"}
 
     # ===================================================================
     #  INTERNAL: fit / predict split
@@ -107,10 +120,13 @@ class HMMRegimeDetector:
         Refit the HMM only when:
           1. Model has never been fitted, OR
           2. At least `_refit_interval` seconds have elapsed since last fit, OR
-          3. At least `_min_new_bars` new observations have arrived since last fit.
+          3. At least `_min_new_bars` new bars have arrived (cumulative, not
+             capped by lookback window).
         """
         now = _time.monotonic()
-        new_bars = len(obs) - self._last_fit_len
+        # Use cumulative bar counter so the trigger works even when
+        # _extract_observations truncates via tail(lookback)
+        new_bars = self._total_bars_seen - self._bars_at_last_fit
         time_elapsed = now - self._last_fit_ts
 
         needs_refit = (
@@ -140,6 +156,7 @@ class HMMRegimeDetector:
         # Update cache timestamps
         self._last_fit_ts = now
         self._last_fit_len = len(obs)
+        self._bars_at_last_fit = self._total_bars_seen
         self._last_obs = obs
         self._fitted = True
 
@@ -170,15 +187,19 @@ class HMMRegimeDetector:
         elif regime == "REVERSAL":
             regime = "REVERSAL_BULL" if avg_return > 0 else "REVERSAL_BEAR"
 
+        # Build transition_probs with unique keys (labels can collide across states)
+        tp_dict = {}
+        for i, p in enumerate(trans_probs):
+            label = self._state_labels.get(i, f"state_{i}")
+            key = label if label not in tp_dict else f"{label}_{i}"
+            tp_dict[key] = round(float(p), 3)
+
         details = {
             "hmm": True,
             "state": int(current_state),
             "state_prob": float(np.max(state_probs)),
             "regime_confidence": float(np.max(state_probs)),
-            "transition_probs": {
-                self._state_labels.get(i, f"state_{i}"): round(float(p), 3)
-                for i, p in enumerate(trans_probs)
-            },
+            "transition_probs": tp_dict,
             "avg_return": round(float(avg_return), 6),
             "vol_level": round(float(obs[-1, 1]), 6),
             "adx": round(float(obs[-1, 3]), 1) if obs.shape[1] > 3 else 0,
@@ -187,7 +208,7 @@ class HMMRegimeDetector:
         return regime, details
 
     # ===================================================================
-    #  Feature extraction + state mapping (unchanged)
+    #  Feature extraction + state mapping
     # ===================================================================
 
     def _extract_observations(self, df: pd.DataFrame) -> Optional[np.ndarray]:

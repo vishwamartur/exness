@@ -14,9 +14,16 @@ class MarketAnalyst:
     """
     def __init__(self):
         self.mistral = get_advisor()
-        self.regime_detector = RegimeDetector()
+        self.regime_detector = RegimeDetector()       # shared fallback
+        self._regime_detectors = {}                   # per-symbol instances
         self.state = SharedState()
         print("[AGENT] MarketAnalyst initialized.")
+
+    def get_regime_detector(self, symbol: str) -> RegimeDetector:
+        """Return a symbol-scoped RegimeDetector (creates on first call)."""
+        if symbol not in self._regime_detectors:
+            self._regime_detectors[symbol] = RegimeDetector()
+        return self._regime_detectors[symbol]
 
     def check_news(self, symbol):
         """Fast check for news blackout."""

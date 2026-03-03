@@ -219,8 +219,8 @@ class PairAgent:
             if should_block:
                 return None, f"Inst Flow Block: {block_reason}"
         
-        # Get detailed regime classification (reuse shared instance to leverage HMM cache)
-        regime_detector = self.analyst.regime_detector
+        # Get detailed regime classification (per-symbol instance to isolate HMM state)
+        regime_detector = self.analyst.get_regime_detector(self.symbol)
         regime_type, regime_details = regime_detector.get_regime(df_scan)
         
         # Skip trades in bad regimes (RANGING, VOLATILE_HIGH)
