@@ -7,13 +7,18 @@ replacing hardcoded threshold rules with learned state transitions.
 The HMM learns 4 latent states from observables (returns, volatility, volume),
 then maps them to actionable regime labels.
 
+Performance: fit() is expensive (iterative, n_iter=100) so it is cached and
+only re-run when enough new data arrives or a time interval elapses.
+predict() is cheap and called on every get_regime() invocation.
+
 Falls back to rule-based detection if HMM fitting fails or insufficient data.
 """
 
+import time as _time
 import numpy as np
 import pandas as pd
 import warnings
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 try:
     from hmmlearn.hmm import GaussianHMM
@@ -37,14 +42,30 @@ class HMMRegimeDetector:
       - Trending (bull or bear, determined by return sign)
       - High volatility / breakout
       - Mean-reverting / transition
+    
+    Performance:
+      - fit() is called at most once per `refit_interval` seconds (default 300s).
+      - predict() is cheap — just a forward pass on the fitted model.
     """
 
-    def __init__(self, n_states: int = 4, lookback: int = 200):
+    def __init__(self, n_states: int = 4, lookback: int = 200,
+                 refit_interval: int = 300, min_new_bars: int = 10):
         self.n_states = n_states
         self.lookback = lookback
-        self.model = None
-        self._state_labels = {}  # Maps HMM state index → regime label
+        self.model: Optional[GaussianHMM] = None
+        self._state_labels: Dict[int, str] = {}
         self._fitted = False
+
+        # ── Caching / throttle ─────────────────────────────────────────────
+        self._refit_interval = refit_interval   # seconds between refits
+        self._min_new_bars = min_new_bars       # min new bars before refit
+        self._last_fit_ts: float = 0.0          # epoch of last fit()
+        self._last_fit_len: int = 0             # len(obs) at last fit()
+        self._last_obs: Optional[np.ndarray] = None  # cached observations
+
+    # ===================================================================
+    #  PUBLIC: get_regime  (cheap — uses cached model)
+    # ===================================================================
 
     def get_regime(self, df: pd.DataFrame) -> Tuple[str, Dict]:
         """
@@ -65,65 +86,111 @@ class HMMRegimeDetector:
             if obs is None or len(obs) < 60:
                 return "NORMAL", {"hmm": False, "reason": "feature_extraction_failed"}
 
-            # Fit HMM on rolling window
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.model = GaussianHMM(
-                    n_components=self.n_states,
-                    covariance_type="full",
-                    n_iter=100,
-                    random_state=42,
-                    tol=0.01
-                )
-                self.model.fit(obs)
+            # Fit only when needed (time elapsed or enough new bars)
+            self._maybe_fit(obs)
 
-            # Decode the most likely state sequence
-            states = self.model.predict(obs)
-            current_state = states[-1]
+            if not self._fitted or self.model is None:
+                return "NORMAL", {"hmm": False, "reason": "model_not_fitted"}
 
-            # Map HMM states to regime labels using state characteristics
-            self._map_states_to_regimes(obs, states)
-            
-            regime = self._state_labels.get(current_state, "NORMAL")
-            
-            # Compute transition probabilities for the current state
-            trans_probs = self.model.transmat_[current_state]
-            
-            # Get state probabilities for current observation
-            state_probs = self.model.predict_proba(obs[-1:].reshape(1, -1))[0]
-
-            # Determine direction for trending regimes
-            recent_returns = obs[-5:, 0]  # Last 5 returns
-            avg_return = np.mean(recent_returns)
-            
-            if regime == "TRENDING":
-                regime = "TRENDING_BULL" if avg_return > 0 else "TRENDING_BEAR"
-            elif regime == "BREAKOUT":
-                regime = "BREAKOUT_BULL" if avg_return > 0 else "BREAKOUT_BEAR"
-            elif regime == "REVERSAL":
-                regime = "REVERSAL_BULL" if avg_return > 0 else "REVERSAL_BEAR"
-
-            details = {
-                "hmm": True,
-                "state": int(current_state),
-                "state_prob": float(np.max(state_probs)),
-                "regime_confidence": float(np.max(state_probs)),
-                "transition_probs": {
-                    self._state_labels.get(i, f"state_{i}"): round(float(p), 3)
-                    for i, p in enumerate(trans_probs)
-                },
-                "avg_return": round(float(avg_return), 6),
-                "vol_level": round(float(obs[-1, 1]), 6),
-                "adx": round(float(obs[-1, 3]), 1) if obs.shape[1] > 3 else 0,
-            }
-
-            self._fitted = True
-            return regime, details
+            # Predict is cheap — just a forward pass
+            return self._predict(obs)
 
         except Exception as e:
             return "NORMAL", {"hmm": False, "reason": f"hmm_error: {str(e)[:60]}"}
 
-    def _extract_observations(self, df: pd.DataFrame) -> np.ndarray:
+    # ===================================================================
+    #  INTERNAL: fit / predict split
+    # ===================================================================
+
+    def _maybe_fit(self, obs: np.ndarray) -> None:
+        """
+        Refit the HMM only when:
+          1. Model has never been fitted, OR
+          2. At least `_refit_interval` seconds have elapsed since last fit, OR
+          3. At least `_min_new_bars` new observations have arrived since last fit.
+        """
+        now = _time.monotonic()
+        new_bars = len(obs) - self._last_fit_len
+        time_elapsed = now - self._last_fit_ts
+
+        needs_refit = (
+            not self._fitted or
+            time_elapsed >= self._refit_interval or
+            new_bars >= self._min_new_bars
+        )
+
+        if not needs_refit:
+            return
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.model = GaussianHMM(
+                n_components=self.n_states,
+                covariance_type="full",
+                n_iter=100,
+                random_state=42,
+                tol=0.01
+            )
+            self.model.fit(obs)
+
+        # Map states after fitting
+        states = self.model.predict(obs)
+        self._map_states_to_regimes(obs, states)
+
+        # Update cache timestamps
+        self._last_fit_ts = now
+        self._last_fit_len = len(obs)
+        self._last_obs = obs
+        self._fitted = True
+
+    def _predict(self, obs: np.ndarray) -> Tuple[str, Dict]:
+        """
+        Cheap prediction using the already-fitted model.
+        Only does a forward pass — no fitting.
+        """
+        states = self.model.predict(obs)
+        current_state = states[-1]
+
+        regime = self._state_labels.get(current_state, "NORMAL")
+
+        # Compute transition probabilities for the current state
+        trans_probs = self.model.transmat_[current_state]
+
+        # Get state probabilities for current observation
+        state_probs = self.model.predict_proba(obs[-1:].reshape(1, -1))[0]
+
+        # Determine direction for trending regimes
+        recent_returns = obs[-5:, 0]  # Last 5 returns
+        avg_return = np.mean(recent_returns)
+
+        if regime == "TRENDING":
+            regime = "TRENDING_BULL" if avg_return > 0 else "TRENDING_BEAR"
+        elif regime == "BREAKOUT":
+            regime = "BREAKOUT_BULL" if avg_return > 0 else "BREAKOUT_BEAR"
+        elif regime == "REVERSAL":
+            regime = "REVERSAL_BULL" if avg_return > 0 else "REVERSAL_BEAR"
+
+        details = {
+            "hmm": True,
+            "state": int(current_state),
+            "state_prob": float(np.max(state_probs)),
+            "regime_confidence": float(np.max(state_probs)),
+            "transition_probs": {
+                self._state_labels.get(i, f"state_{i}"): round(float(p), 3)
+                for i, p in enumerate(trans_probs)
+            },
+            "avg_return": round(float(avg_return), 6),
+            "vol_level": round(float(obs[-1, 1]), 6),
+            "adx": round(float(obs[-1, 3]), 1) if obs.shape[1] > 3 else 0,
+        }
+
+        return regime, details
+
+    # ===================================================================
+    #  Feature extraction + state mapping (unchanged)
+    # ===================================================================
+
+    def _extract_observations(self, df: pd.DataFrame) -> Optional[np.ndarray]:
         """
         Extract the observation matrix for HMM from the DataFrame.
         Uses the last `lookback` bars.
@@ -174,13 +241,6 @@ class HMMRegimeDetector:
         """
         Map HMM state indices to human-readable regime labels based on
         the statistical characteristics of each state.
-        
-        Strategy:
-          - Compute mean volatility and mean |return| per state
-          - Lowest vol state → RANGING
-          - Highest vol state → VOLATILE_HIGH
-          - Highest |return| with moderate vol → TRENDING
-          - Remaining → NORMAL or REVERSAL
         """
         state_stats = {}
         for s in range(self.n_states):
@@ -200,31 +260,21 @@ class HMMRegimeDetector:
                 'count': int(mask.sum())
             }
 
-        # Sort states by volatility
         sorted_by_vol = sorted(state_stats.keys(), key=lambda s: state_stats[s]['mean_vol'])
-        # Sort states by |returns|
         sorted_by_ret = sorted(state_stats.keys(), key=lambda s: state_stats[s]['mean_abs_ret'])
-        # Sort states by ADX
         sorted_by_adx = sorted(state_stats.keys(), key=lambda s: state_stats[s]['mean_adx'])
 
         labels = {}
-
-        # Lowest volatility state → RANGING
         labels[sorted_by_vol[0]] = "RANGING"
-
-        # Highest volatility state → VOLATILE_HIGH
         labels[sorted_by_vol[-1]] = "VOLATILE_HIGH"
 
-        # Highest ADX state (if not already assigned) → TRENDING
         for s in reversed(sorted_by_adx):
             if s not in labels:
                 labels[s] = "TRENDING"
                 break
 
-        # Remaining states → NORMAL or BREAKOUT
         for s in range(self.n_states):
             if s not in labels:
-                # If high volume ratio → potential breakout
                 if state_stats[s]['mean_vol_ratio'] > 1.3:
                     labels[s] = "BREAKOUT"
                 elif state_stats[s]['mean_abs_ret'] > state_stats[sorted_by_ret[1]]['mean_abs_ret']:
@@ -235,9 +285,7 @@ class HMMRegimeDetector:
         self._state_labels = labels
 
     def is_tradeable_regime(self, regime: str) -> bool:
-        """
-        Compatible interface with existing RegimeDetector.
-        """
+        """Compatible interface with existing RegimeDetector."""
         good_regimes = [
             'TRENDING', 'TRENDING_BULL', 'TRENDING_BEAR',
             'BREAKOUT_BULL', 'BREAKOUT_BEAR',
