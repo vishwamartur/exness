@@ -268,5 +268,7 @@ def get_barrier_stats(df: pd.DataFrame) -> dict:
         'risk_reward_ratio': (
             abs(valid.loc[valid['tb_barrier'] == 'TP', 'tb_return'].mean()) /
             abs(valid.loc[valid['tb_barrier'] == 'SL', 'tb_return'].mean())
-        ) if sl_count > 0 and tp_count > 0 else 0,
+        ) if sl_count > 0 and tp_count > 0
+            and abs(valid.loc[valid['tb_barrier'] == 'SL', 'tb_return'].mean()) > 0
+            else 0,
     }
