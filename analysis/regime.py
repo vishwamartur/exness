@@ -7,16 +7,17 @@ import pandas as pd
 import numpy as np
 
 try:
-    from analysis.hmm_regime import HMMRegimeDetector
-    HMM_AVAILABLE = True
+    from analysis.hmm_regime import HMMRegimeDetector, HMM_AVAILABLE as HMMLEARN_AVAILABLE
 except ImportError:
-    HMM_AVAILABLE = False
+    HMMLEARN_AVAILABLE = False
 
 class RegimeDetector:
     def __init__(self, use_hmm: bool = True):
         self.regime_history = []
         self.max_history = 100
-        self.use_hmm = use_hmm and HMM_AVAILABLE
+        self.use_hmm = use_hmm and HMMLEARN_AVAILABLE
+        if use_hmm and not HMMLEARN_AVAILABLE:
+            print("[REGIME] Warning: HMM requested but hmmlearn is not installed. Using rule-based detection.")
         self._hmm = HMMRegimeDetector() if self.use_hmm else None
 
     def get_regime(self, df):
