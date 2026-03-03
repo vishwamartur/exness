@@ -166,7 +166,55 @@ def add_technical_features(df):
     df = _add_fair_value_gaps(df)
     df = _add_liquidity_levels(df)
 
-    # ─── 7. Lag Features ─────────────────────────────────────────────────
+    # ─── 7. Time-of-Day / Day-of-Week Features (Session Encoding) ────────
+    # Forex behavior changes dramatically across sessions (Asian/London/NY).
+    # Sin/cos encoding preserves cyclical nature (23:59 is close to 00:00).
+    if 'time' in df.columns:
+        try:
+            timestamps = pd.to_datetime(df['time'])
+            hour = timestamps.dt.hour + timestamps.dt.minute / 60.0
+            day = timestamps.dt.dayofweek  # 0=Mon, 6=Sun
+
+            # Sin/Cos encoding for smooth cyclical features
+            df['hour_sin'] = np.sin(2 * np.pi * hour / 24.0)
+            df['hour_cos'] = np.cos(2 * np.pi * hour / 24.0)
+            df['day_sin'] = np.sin(2 * np.pi * day / 7.0)
+            df['day_cos'] = np.cos(2 * np.pi * day / 7.0)
+
+            # Session flags (binary)
+            df['is_london'] = ((hour >= 7) & (hour < 16)).astype(int)
+            df['is_ny'] = ((hour >= 13) & (hour < 22)).astype(int)
+            df['is_overlap'] = ((hour >= 13) & (hour < 16)).astype(int)  # London-NY overlap
+            df['is_asian'] = ((hour >= 0) & (hour < 8)).astype(int)
+        except Exception:
+            pass  # Skip if time column can't be parsed
+
+    # ─── 8. GARCH-Style Volatility Forecast ──────────────────────────────
+    # EWMA variance as fast GARCH(1,1) approximation (avoids arch library dependency).
+    # Lambda=0.94 matches RiskMetrics standard.
+    returns_sq = df['log_ret'] ** 2
+    df['garch_var'] = returns_sq.ewm(span=20, adjust=False).mean()
+    df['garch_vol'] = np.sqrt(df['garch_var'])
+    # Volatility forecast ratio: current vol vs 50-bar average
+    df['garch_vol_ratio'] = df['garch_vol'] / df['garch_vol'].rolling(window=50, min_periods=10).mean()
+    df['garch_vol_ratio'] = df['garch_vol_ratio'].replace([np.inf, -np.inf], 1.0).fillna(1.0)
+
+    # ─── 9. Mean Reversion Z-Score ───────────────────────────────────────
+    # How far price is from its mean in standard deviation terms.
+    # Z > 2 = overextended up, Z < -2 = overextended down.
+    sma_50_val = df['sma_50'] if 'sma_50' in df.columns else df['close'].rolling(50).mean()
+    price_std = df['close'].rolling(window=50, min_periods=10).std()
+    df['price_zscore_50'] = ((df['close'] - sma_50_val) / price_std.replace(0, np.nan)).fillna(0)
+
+    # ─── 10. Fractional Differentiation (Memory-Preserving Stationarity) ─
+    # Makes price data stationary while retaining memory/trend information.
+    # Uses fixed-window fracdiff approximation (d=0.4, window=20).
+    try:
+        df['frac_diff_close'] = _fracdiff(df['close'].values, d=0.4, window=20)
+    except Exception:
+        df['frac_diff_close'] = 0.0
+
+    # ─── 11. Lag Features ────────────────────────────────────────────────
     for lag in [1, 2, 3, 5]:
         df[f'log_ret_lag_{lag}'] = df['log_ret'].shift(lag)
         df[f'rsi_lag_{lag}'] = df['rsi'].shift(lag)
@@ -177,6 +225,42 @@ def add_technical_features(df):
     df.dropna(inplace=True)
 
     return df
+
+
+def _fracdiff(series: np.ndarray, d: float = 0.4, window: int = 20) -> np.ndarray:
+    """
+    Fixed-window fractional differentiation (López de Prado).
+    
+    Makes the series stationary while preserving memory/trend information.
+    d=0.4 is a good default for most financial time series.
+    
+    Parameters
+    ----------
+    series : np.ndarray — raw price series
+    d : float — fractional differentiation order (0 < d < 1)
+    window : int — number of lags to use in the weights
+    
+    Returns
+    -------
+    np.ndarray — fractionally differentiated series
+    """
+    # Compute weights using the binomial series expansion
+    weights = [1.0]
+    for k in range(1, window):
+        w = -weights[-1] * (d - k + 1) / k
+        weights.append(w)
+    weights = np.array(weights[::-1])  # Reverse for convolution order
+    
+    # Apply the weights as a filter
+    n = len(series)
+    result = np.full(n, np.nan)
+    for i in range(window - 1, n):
+        result[i] = np.dot(weights, series[i - window + 1: i + 1])
+    
+    # Fill initial NaN values with 0
+    result = np.nan_to_num(result, nan=0.0)
+    return result
+
 
 def _add_volume_profile_poc(df, lookback=50):
     """

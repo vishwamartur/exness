@@ -25,58 +25,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 
-def apply_atr_barrier(df, atr_tp_mult=3.0, atr_sl_mult=1.5, time_horizon=20):
-    """
-    Labels data using ATR-based barriers (matches live trading logic).
-    Uses dynamic TP/SL based on ATR, not fixed pips.
-    
-    1 (Buy): Price hits ATR*TP_mult before ATR*SL_mult within time_horizon bars.
-    0 (No Trade): Price hits SL or times out.
-    """
-    labels = []
-    atr = df['atr'].values if 'atr' in df.columns else None
-    
-    if atr is None:
-        print("Warning: ATR column not found, falling back to fixed barriers")
-        return apply_fixed_barrier(df, time_horizon)
-    
-    for i in range(len(df)):
-        if i + time_horizon >= len(df):
-            labels.append(0)
-            continue
-        
-        entry_price = df['close'].iloc[i]
-        current_atr = atr[i]
-        
-        if current_atr <= 0:
-            labels.append(0)
-            continue
-        
-        tp_dist = current_atr * atr_tp_mult
-        sl_dist = current_atr * atr_sl_mult
-        
-        future_window = df.iloc[i+1 : i+1+time_horizon]
-        
-        hit_tp = False
-        hit_sl = False
-        
-        for j in range(len(future_window)):
-            high = future_window['high'].iloc[j]
-            low = future_window['low'].iloc[j]
-            
-            if high >= entry_price + tp_dist:
-                hit_tp = True
-                break
-            if low <= entry_price - sl_dist:
-                hit_sl = True
-                break
-        
-        if hit_tp and not hit_sl:
-            labels.append(1)
-        else:
-            labels.append(0)
-    
-    return pd.Series(labels, index=df.index)
+from utils.triple_barrier import apply_triple_barrier as apply_atr_barrier
 
 
 def apply_fixed_barrier(df, time_horizon=20):
