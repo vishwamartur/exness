@@ -1,6 +1,7 @@
 """
 News Sentiment Analyzer
 Scrapes financial news and analyzes sentiment using AI/ML.
+Enhanced with Google Gemini AI for real-time market intelligence.
 """
 import os
 import aiohttp
@@ -9,14 +10,19 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 import re
 
+from analysis.gemini_news_analyzer import get_gemini_analyzer
+
 class SentimentAnalyzer:
     """
     Analyzes market sentiment from news and social media.
     Returns sentiment score (-1.0 to +1.0) for symbols.
+    
+    Enhanced: Now powered by Google Gemini AI for real-time news analysis.
     """
     
     def __init__(self):
         self.api_key = os.getenv("NEWS_API_KEY", "")
+        self.gemini = get_gemini_analyzer()
         self.cache = {}
         self.cache_duration = 300  # 5 minutes
         
@@ -31,14 +37,14 @@ class SentimentAnalyzer:
             if (datetime.now(timezone.utc).timestamp() - cached_time) < self.cache_duration:
                 return cached_data
         
-        # Get news sentiment
+        # Get Gemini AI-powered news sentiment (primary)
         news_sentiment = await self._fetch_news_sentiment(symbol)
         
         # Get technical sentiment (from price action)
         tech_sentiment = await self._analyze_technical_sentiment(symbol)
         
-        # Combine
-        combined_score = (news_sentiment['score'] * 0.6 + tech_sentiment['score'] * 0.4)
+        # Combine: 70% news (Gemini), 30% technical
+        combined_score = (news_sentiment['score'] * 0.7 + tech_sentiment['score'] * 0.3)
         combined_confidence = max(news_sentiment['confidence'], tech_sentiment['confidence'])
         
         result = {
@@ -46,7 +52,11 @@ class SentimentAnalyzer:
             'confidence': round(combined_confidence, 3),
             'news_score': news_sentiment['score'],
             'tech_score': tech_sentiment['score'],
-            'source': 'combined',
+            'source': news_sentiment.get('source', 'combined'),
+            'direction_bias': news_sentiment.get('direction_bias', 'NEUTRAL'),
+            'key_events': news_sentiment.get('key_events', []),
+            'risk_level': news_sentiment.get('risk_level', 'MEDIUM'),
+            'reasoning': news_sentiment.get('reasoning', ''),
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
@@ -56,42 +66,26 @@ class SentimentAnalyzer:
         return result
     
     async def _fetch_news_sentiment(self, symbol: str) -> Dict:
-        """Fetch and analyze news sentiment."""
-        # Simplified implementation - can be enhanced with real news API
-        # For now, return neutral sentiment
+        """Fetch and analyze news sentiment using Gemini AI."""
         
-        # Map forex/crypto to keywords
-        keywords = {
-            'EURUSD': 'EUR USD euro dollar forex',
-            'GBPUSD': 'GBP USD pound dollar forex',
-            'USDJPY': 'USD JPY dollar yen forex',
-            'BTCUSD': 'BTC bitcoin crypto cryptocurrency',
-            'ETHUSD': 'ETH ethereum crypto cryptocurrency',
-            'XAUUSD': 'XAU gold precious metals',
-            'USOIL': 'oil crude petroleum WTI'
-        }
+        # Use Gemini AI if available
+        if self.gemini.is_available():
+            gemini_result = await self.gemini.analyze(symbol)
+            return gemini_result
         
-        # Default to symbol name
-        keyword = keywords.get(symbol, symbol)
-        
-        # Placeholder for news API integration
-        # In production, integrate with:
-        # - NewsAPI.org
-        # - Finnhub
-        # - Twitter/X API
-        # - Reddit API
-        
+        # Fallback: return neutral if Gemini unavailable
         return {
-            'score': 0.0,  # Neutral
-            'confidence': 0.3,
-            'source': 'news_placeholder'
+            'score': 0.0,
+            'confidence': 0.1,
+            'source': 'fallback',
+            'direction_bias': 'NEUTRAL',
+            'key_events': [],
+            'risk_level': 'MEDIUM',
+            'reasoning': 'No news API available'
         }
     
     async def _analyze_technical_sentiment(self, symbol: str) -> Dict:
         """Analyze sentiment from technical indicators."""
-        # This would integrate with your existing technical analysis
-        # For now, return neutral
-        
         return {
             'score': 0.0,
             'confidence': 0.5,
@@ -118,8 +112,19 @@ class SentimentAnalyzer:
         if abs(score) <= 0.2:  # Neutral sentiment
             return True
         
-        # Sentiment contradicts trade direction
-        return False
+        # Strong contradiction — Gemini says opposite direction
+        # Only block if Gemini specifically confirms high risk
+        risk = sentiment.get('risk_level', 'MEDIUM')
+        if risk == 'HIGH' and confidence > 0.7:
+            return False
+            
+        # Moderate contradiction — still allow but flag
+        if direction == 'BUY' and score < -0.3:
+            return False
+        if direction == 'SELL' and score > 0.3:
+            return False
+        
+        return True
     
     def get_sentiment_recommendation(self, sentiment: Dict) -> str:
         """Get human-readable sentiment recommendation."""
