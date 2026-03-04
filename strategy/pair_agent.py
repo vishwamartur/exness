@@ -120,27 +120,30 @@ class PairAgent:
             # Ideally PairAgent is autonomous.
             
             # Fetch Primary Data
-            df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000) # Increased for Scalping Indicators (M1)
+            df, primary_truncated = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000) # Increased for Scalping Indicators (M1)
             
             if df is None or len(df) < 100:
                 return None, "Insufficient Data"
+            
+            if primary_truncated:
+                return None, "Truncated Data: Broker History Limit"
 
             data_dict = {self.timeframe: df}
             
             # Fetch Multi-Timeframe Data if enabled
             if getattr(settings, 'M5_TREND_FILTER', False):
-                 m5 = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 100)
-                 if m5 is not None:
+                 m5, m5_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 100)
+                 if m5 is not None and not m5_truncated:
                     data_dict['M5'] = m5
             
             if settings.H1_TREND_FILTER:
-                 h1 = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 100)
-                 if h1 is not None:
+                 h1, h1_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 100)
+                 if h1 is not None and not h1_truncated:
                     data_dict['H1'] = h1
             
             if settings.H4_TREND_FILTER:
-                 h4 = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 60)
-                 if h4 is not None:
+                 h4, h4_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 60)
+                 if h4 is not None and not h4_truncated:
                     data_dict['H4'] = h4
                  
             return data_dict, "OK"
@@ -460,8 +463,8 @@ class PairAgent:
         else:
             try:
                 # Fetch 200 bars for accurate M1 ATR (was 50 - too small for indicator warmup)
-                df = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 200)
-                if df is not None:
+                df, truncated = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 200)
+                if df is not None and not truncated:
                     # Add ATR if needed, or use high-low diff of last candle as approx
                     # Ideally use features lib, but let's keep it lightweight or import features
                     from strategy import features

@@ -110,8 +110,8 @@ class PreTradeAnalyzer:
             try:
                 # Fetch more bars for better analysis
                 bars = 200 if tf in ["H1", "H4"] else 100
-                df = loader.get_historical_data(symbol, tf, bars)
-                if df is not None and len(df) >= 50:
+                df, truncated = loader.get_historical_data(symbol, tf, bars)
+                if df is not None and len(df) >= 50 and not truncated:
                     df = features.add_technical_features(df)
                     data_dict[tf] = df
             except Exception as e:

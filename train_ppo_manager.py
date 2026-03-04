@@ -52,16 +52,16 @@ def train_ppo():
                 print(f"[DATA] Fetching context window around trade for {symbol}...")
                 # In a live system, you'd fetch by exact Datetime bounds.
                 # For this script we will pull a localized 1000 bar chunk.
-                df = loader.get_historical_data(symbol, settings.TIMEFRAME, 500)
-                if df is not None and len(df) > 100:
+                df, truncated = loader.get_historical_data(symbol, settings.TIMEFRAME, 500)
+                if df is not None and len(df) > 100 and not truncated:
                     df = features.add_technical_features(df)
                     df.dropna(inplace=True)
                     master_dfs.append(df)
         else:
             print("[DATA] No recent trades in journal. Falling back to general history.")
             for symbol in train_symbols:
-                df = loader.get_historical_data(symbol, settings.TIMEFRAME, 1000)
-                if df is not None and len(df) > 100:
+                df, truncated = loader.get_historical_data(symbol, settings.TIMEFRAME, 1000)
+                if df is not None and len(df) > 100 and not truncated:
                     df = features.add_technical_features(df)
                     df.dropna(inplace=True)
                     master_dfs.append(df)

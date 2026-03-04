@@ -75,7 +75,7 @@ async def verify():
     
     # Mock loader to ensure it's NOT called if cache works
     original_loader = loader.get_historical_data
-    loader.get_historical_data = MagicMock(return_value=None) 
+    loader.get_historical_data = MagicMock(return_value=(None, False)) 
     
     await agent.manage_active_trades()
     

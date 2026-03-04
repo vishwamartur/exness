@@ -228,7 +228,12 @@ class SequenceTransformerPredictor:
                         correct += (val_logits.argmax(dim=1) == y_val_batch).sum().item()
                         total += len(y_val_batch)
                         
-                    val_acc = correct / total
+                    # Guard against empty validation set
+                    if total > 0:
+                        val_acc = correct / total
+                    else:
+                        val_acc = 0.0
+                        if verbose: print(f"Epoch {epoch+1}: Empty validation set encountered")
                     
                     self.lr_scheduler.step(val_acc)
                     

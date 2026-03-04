@@ -84,8 +84,8 @@ class AdaptivePositionManager:
         pips_pnl = price_diff / pip_value
         
         # Fetch latest market data
-        df = loader.get_historical_data(symbol, settings.TIMEFRAME, 100)
-        df_features = features.add_technical_features(df) if df is not None and len(df) >= 50 else None
+        df, truncated = loader.get_historical_data(symbol, settings.TIMEFRAME, 100)
+        df_features = features.add_technical_features(df) if df is not None and len(df) >= 50 and not truncated else None
         
         try:
             # Prepare state for PPO RL Position Manager

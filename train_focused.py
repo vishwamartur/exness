@@ -166,9 +166,9 @@ def train():
         print(f"\n[{symbol}] Fetching data...", end=" ")
         
         try:
-            df = loader.get_historical_data(symbol, TIMEFRAME, BARS_PER_SYMBOL)
+            df, truncated = loader.get_historical_data(symbol, TIMEFRAME, BARS_PER_SYMBOL)
             
-            if df is None or len(df) < MIN_BARS:
+            if df is None or len(df) < MIN_BARS or truncated:
                 print(f"Insufficient data ({len(df) if df is not None else 0} bars)")
                 continue
             

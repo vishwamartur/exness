@@ -89,8 +89,12 @@ async def main():
                     # 1. Fetch minimum rolling 100 bars for OLS regression math
                     # Use H1 timeframe for arb to filter out microstructure noise and focus on macro divergence
                     from market_data import loader
-                    df_A = loader.get_historical_data(symbol_A, "H1", 200)
-                    df_B = loader.get_historical_data(symbol_B, "H1", 200)
+                    df_A, truncated_a = loader.get_historical_data(symbol_A, "H1", 200)
+                    df_B, truncated_b = loader.get_historical_data(symbol_B, "H1", 200)
+                    
+                    # Skip this pair if data was truncated (broker history limit)
+                    if truncated_a or truncated_b:
+                        continue
                     
                     # 2. Analyze Pair
                     # Generates a Signal if Z-Score drifts beyond +-2 standard deviations

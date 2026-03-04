@@ -41,8 +41,8 @@ class DataCache:
                 return df
 
         # Cache miss — fetch from MT5
-        df = loader.get_historical_data(symbol, timeframe, n_bars)
-        if df is not None:
+        df, truncated = loader.get_historical_data(symbol, timeframe, n_bars)
+        if df is not None and not truncated:
             self._cache[key] = (now, df)
 
         return df

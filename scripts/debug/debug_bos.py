@@ -19,9 +19,9 @@ async def verify_bos():
     
     # 1. Fetch Data
     print("Fetching historical data...")
-    df = await run_in_executor(loader.get_historical_data, symbol, timeframe, 1000)
+    df, truncated = await run_in_executor(loader.get_historical_data, symbol, timeframe, 1000)
     
-    if df is None or len(df) < 100:
+    if df is None or len(df) < 100 or truncated:
         print("Failed to fetch data.")
         return
 
