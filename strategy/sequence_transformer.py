@@ -189,8 +189,8 @@ class SequenceTransformerPredictor:
             
         X_scaled = X_scaled_flat.reshape(num_samples, seq_len, num_features)
         
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-        y_tensor = torch.tensor(y, dtype=torch.long)
+        X_tensor = torch.as_tensor(X_scaled, dtype=torch.float32)
+        y_tensor = torch.as_tensor(y, dtype=torch.long)
         
         # Validation data (Handle scaling securely in chunks if large)
         has_val = X_val_seq is not None and y_val is not None
@@ -206,8 +206,8 @@ class SequenceTransformerPredictor:
                 
             X_val_scaled = X_val_scaled_flat.reshape(val_samples, seq_len, num_features)
             
-            X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)
-            y_val_tensor = torch.tensor(y_val, dtype=torch.long)
+            X_val_tensor = torch.as_tensor(X_val_scaled, dtype=torch.float32)
+            y_val_tensor = torch.as_tensor(y_val, dtype=torch.long)
             
         best_val_acc = 0
         patience_counter = 0
