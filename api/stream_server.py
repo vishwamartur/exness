@@ -11,6 +11,8 @@ import threading
 import logging
 from datetime import datetime, timezone
 
+from utils.trade_journal import TradeJournal
+
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("StreamServer")
 
@@ -156,6 +158,46 @@ def get_scan():
 def get_state():
     return _state
 
+@app.get("/api/journal/daily")
+def get_journal_daily():
+    journal = TradeJournal()
+    stats = journal.get_daily_stats()
+    return stats if stats else {"total": 0, "wins": 0, "losses": 0, "total_profit": 0, "win_rate": 0, "avg_rr": 0}
+
+@app.get("/api/journal/confluence")
+def get_journal_confluence(limit: int = 200):
+    journal = TradeJournal()
+    return journal.get_confluence_analysis(last_n_trades=limit)
+
+@app.get("/api/journal/trades")
+def get_historical_trades(limit: int = 50):
+    journal = TradeJournal()
+    import sqlite3
+    conn = sqlite3.connect(journal.db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ticket, symbol, direction, lot_size, entry_price, exit_price, profit, outcome, entry_time 
+        FROM trades 
+        ORDER BY entry_time DESC 
+        LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "ticket": r[0],
+            "symbol": r[1],
+            "direction": r[2],
+            "lot_size": r[3],
+            "entry_price": r[4],
+            "exit_price": r[5],
+            "profit": r[6],
+            "outcome": r[7],
+            "entry_time": r[8]
+        }
+        for r in rows
+    ]
 
 # ─── Server Startup ───────────────────────────────────────────────────────────
 _loop = None

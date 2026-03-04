@@ -35,7 +35,7 @@ from market_data import loader
 from config import settings
 
 # Key symbols to train models for
-KEY_SYMBOLS = ["EURUSD", "XAUUSD", "BTCUSD", "GBPUSD"]
+KEY_SYMBOLS = settings.ALL_BASE_SYMBOLS
 
 
 def create_sequences(data, target, seq_length):
@@ -55,8 +55,8 @@ def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
     print(f"{'='*50}")
     
     # 1. Load Data - use M15 to match live strategy
-    df = loader.get_historical_data(symbol, timeframe, settings.HISTORY_BARS)
-    if df is None or len(df) < 200:
+    df, truncated = loader.get_historical_data(symbol, timeframe, settings.HISTORY_BARS)
+    if df is None or len(df) < 200 or truncated:
         print(f"Failed to load sufficient data for {symbol}. Skipping.")
         return False
     

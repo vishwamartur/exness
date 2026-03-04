@@ -109,8 +109,8 @@ class ScalpingStrategy:
         if not settings.H1_TREND_FILTER:
             return 0 # Neutral/Disabled
             
-        df = loader.get_historical_data(symbol, "H1", 60)
-        if df is None or len(df) < 55:
+        df, truncated = loader.get_historical_data(symbol, "H1", 60)
+        if df is None or len(df) < 55 or truncated:
             return 0
             
         sma_50 = df['close'].rolling(window=50).mean().iloc[-1]
@@ -158,9 +158,9 @@ class ScalpingStrategy:
             return
 
         # 3. Get Data
-        df = loader.get_historical_data(symbol, settings.TIMEFRAME, 200)
+        df, truncated = loader.get_historical_data(symbol, settings.TIMEFRAME, 200)
         
-        if df is None or len(df) < 100:
+        if df is None or len(df) < 100 or truncated:
             print(f"[{symbol}] Not enough data.")
             return
             

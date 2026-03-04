@@ -6,12 +6,14 @@ import PositionsTable from './components/PositionsTable'
 import TradeFeed from './components/TradeFeed'
 import EventLog from './components/EventLog'
 import ForexSessionClocks from './components/ForexSessionClocks'
+import TradingJournal from './components/TradingJournal'
 
 const VERSION = '2.2'
 
 export default function App() {
     const state = useBotWebSocket()
     const [now, setNow] = useState(new Date())
+    const [activeTab, setActiveTab] = useState('live')
 
     // Clock
     useEffect(() => {
@@ -44,11 +46,41 @@ export default function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ fontSize: 22 }}>📈</span>
-                    <div>
-                        <div style={{ fontWeight: 700, fontSize: 15 }}>MT5 Algo Trading Dashboard</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Exness · M1 Scalping · v{VERSION}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                        <span style={{ fontSize: 22 }}>📈</span>
+                        <div>
+                            <div style={{ fontWeight: 700, fontSize: 15 }}>MT5 Algo Trading Dashboard</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Exness · M1 Scalping · v{VERSION}</div>
+                        </div>
+                    </div>
+
+                    {/* ── Nav Tabs ── */}
+                    <div style={{ display: 'flex', gap: 24, marginTop: 4 }}>
+                        <button
+                            onClick={() => setActiveTab('live')}
+                            style={{
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                fontSize: 13, fontWeight: 600, paddingBottom: 6,
+                                color: activeTab === 'live' ? 'var(--blue)' : 'var(--text-secondary)',
+                                borderBottom: activeTab === 'live' ? '2px solid var(--blue)' : '2px solid transparent',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Live Operations
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('journal')}
+                            style={{
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                fontSize: 13, fontWeight: 600, paddingBottom: 6,
+                                color: activeTab === 'journal' ? 'var(--blue)' : 'var(--text-secondary)',
+                                borderBottom: activeTab === 'journal' ? '2px solid var(--blue)' : '2px solid transparent',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Trading Journal
+                        </button>
                     </div>
                 </div>
 
@@ -74,30 +106,39 @@ export default function App() {
                 </div>
             </header>
 
-            {/* ── Account Overview ── */}
-            <div style={{ gridColumn: '1 / -1' }}>
-                <AccountCard account={state.account} connected={state.connected} />
-            </div>
+            {/* ── MAIN CONTENT AREA ── */}
+            {activeTab === 'live' ? (
+                <>
+                    {/* ── Account Overview ── */}
+                    <div style={{ gridColumn: '1 / -1' }}>
+                        <AccountCard account={state.account} connected={state.connected} />
+                    </div>
 
-            {/* ── Scanner Grid ── */}
-            <div style={{ gridColumn: '1 / 3', overflow: 'hidden' }}>
-                <ScannerGrid scanSummary={state.scanSummary} lastScan={state.lastScan} />
-            </div>
+                    {/* ── Scanner Grid ── */}
+                    <div style={{ gridColumn: '1 / 3', overflow: 'hidden' }}>
+                        <ScannerGrid scanSummary={state.scanSummary} lastScan={state.lastScan} />
+                    </div>
 
-            {/* ── Event Log (right column, spans 2 rows) ── */}
-            <div style={{ gridColumn: 3, gridRow: '3 / 5', overflow: 'hidden' }}>
-                <EventLog events={state.events} />
-            </div>
+                    {/* ── Event Log (right column, spans 2 rows) ── */}
+                    <div style={{ gridColumn: 3, gridRow: '3 / 5', overflow: 'hidden' }}>
+                        <EventLog events={state.events} />
+                    </div>
 
-            {/* ── Open Positions ── */}
-            <div style={{ overflow: 'hidden' }}>
-                <PositionsTable positions={state.positions} />
-            </div>
+                    {/* ── Open Positions ── */}
+                    <div style={{ overflow: 'hidden' }}>
+                        <PositionsTable positions={state.positions} />
+                    </div>
 
-            {/* ── Trade Feed ── */}
-            <div style={{ overflow: 'hidden' }}>
-                <TradeFeed recentTrades={state.recentTrades} />
-            </div>
+                    {/* ── Trade Feed ── */}
+                    <div style={{ overflow: 'hidden' }}>
+                        <TradeFeed recentTrades={state.recentTrades} />
+                    </div>
+                </>
+            ) : (
+                <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'hidden' }}>
+                    <TradingJournal />
+                </div>
+            )}
         </div>
     )
 }

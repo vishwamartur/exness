@@ -48,7 +48,8 @@ def train():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"\n[INFO] Using device: {device}")
     if device == 'cuda':
-        print(f"[INFO] GPU: {torch.cuda.get_device_name(0)}")
+        torch.backends.cudnn.benchmark = True  # Enable optimized convolutions/attention
+        print(f"[INFO] GPU: {torch.cuda.get_device_name(0)} (cuDNN Benchmark Enabled)")
     
     # Initialize connection and detect symbols
     client = MT5Client()
@@ -145,7 +146,7 @@ def train():
         X_train, y_train,
         X_val, y_val,
         epochs=100,
-        batch_size=64,
+        batch_size=1024,  # Increased for rapid GPU saturation
         verbose=True
     )
     

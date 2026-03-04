@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import sys
 import os
 import time
+import warnings
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -57,6 +58,10 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
     Fetches historical bars from MT5.
     For large requests (>50k bars), fetches in chunks.
     Can cache results to disk to speed up repeated model training.
+    
+    Returns:
+        tuple: (DataFrame or None, bool) - (data, truncated_flag)
+               truncated_flag is True if broker history limit was hit
     """
     # ─── Cache Check ─────────────────────────────────────────────────────
     cache_path = None
@@ -68,20 +73,21 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         if os.path.exists(cache_path):
             print(f"  [{symbol}] Loading {n_bars:,} bars from local cache...")
             try:
-                return pd.read_pickle(cache_path)
+                df = pd.read_pickle(cache_path)
+                return (df, False)  # Cached data is not truncated
             except Exception as e:
                 print(f"  [{symbol}] Failed to read cache: {e}. Re-fetching...")
 
     if not mt5.terminal_info():
         if not initial_connect():
-            return None
+            return (None, False)
 
     tf = TF_MAP.get(timeframe_str, mt5.TIMEFRAME_M15)
     
     # Ensure symbol is selected/visible
     if not mt5.symbol_select(symbol, True):
         print(f"Failed to select {symbol}")
-        return None
+        return (None, False)
     
     # Small request - fetch directly
     if n_bars <= MT5_MAX_BARS:
@@ -89,22 +95,24 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         
         if rates is None or len(rates) == 0:
             print(f"No rates for {symbol}")
-            return None
+            return (None, False)
             
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
-        return df
+        return (df, False)
     
     # Large request - fetch in chunks using date ranges
     print(f"  Fetching {n_bars:,} bars in chunks...", end=" ", flush=True)
     
     all_data = []
     minutes_per_bar = TF_MINUTES.get(timeframe_str, 15)
+    truncated_flag = False
     
     # Start from now and go backwards
     end_time = datetime.now(timezone.utc)
     remaining = n_bars
     chunk_count = 0
+    prev_oldest_unix = None
     
     while remaining > 0:
         chunk_size = min(remaining, MT5_MAX_BARS)
@@ -115,6 +123,18 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         if rates is None or len(rates) == 0:
             # No more data available
             break
+            
+        # Check if we are stuck polling the same exact chunk of time (e.g. reached broker history limit)
+        current_oldest_unix = rates[0]['time']
+        if prev_oldest_unix is not None and current_oldest_unix >= prev_oldest_unix:
+            truncated_flag = True
+            bars_retrieved = chunk_count * MT5_MAX_BARS + len(all_data[-1]) if all_data else 0
+            warning_msg = (f"Broker history limit reached for {symbol} {timeframe_str}: "
+                         f"requested {n_bars:,} bars but only {bars_retrieved:,} available")
+            warnings.warn(warning_msg, UserWarning)
+            print(f"\n  [{symbol}] Reached broker history limit ({bars_retrieved:,} bars available).")
+            break
+        prev_oldest_unix = current_oldest_unix
         
         df_chunk = pd.DataFrame(rates)
         all_data.append(df_chunk)
@@ -123,19 +143,19 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         chunk_count += 1
         
         # Move end_time to before the oldest bar we got
-        oldest_time = datetime.fromtimestamp(rates[0]['time'], tz=timezone.utc)
+        oldest_time = datetime.fromtimestamp(current_oldest_unix, tz=timezone.utc)
         end_time = oldest_time - timedelta(minutes=minutes_per_bar)
         
         # Progress
         if chunk_count % 5 == 0:
-            print(f"{n_bars - remaining:,}...", end=" ")
+            print(f"{n_bars - remaining:,}...", end=" ", flush=True)
         
         # Small delay to avoid overwhelming MT5
         time.sleep(0.1)
     
     if not all_data:
         print(f"No rates for {symbol}")
-        return None
+        return (None, False)
     
     # Combine and sort
     df = pd.concat(all_data, ignore_index=True)
@@ -152,13 +172,13 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         except Exception as e:
             print(f"  [{symbol}] Warning: Failed to save cache: {e}")
             
-    return df
+    return (df, truncated_flag)
 
 
 def get_multi_timeframe_data(symbol, n_bars_primary=500):
     """
     Fetches M15, H1, and H4 data in one call for multi-timeframe analysis.
-    Returns a dict: {"M15": df, "H1": df, "H4": df}
+    Returns a dict: {"M15": (df, truncated), "H1": (df, truncated), "H4": (df, truncated)}
     """
     data = {}
     
@@ -169,9 +189,9 @@ def get_multi_timeframe_data(symbol, n_bars_primary=500):
     }
     
     for tf_str, bars in tf_bars.items():
-        df = get_historical_data(symbol, tf_str, bars)
+        df, truncated = get_historical_data(symbol, tf_str, bars)
         if df is not None:
-            data[tf_str] = df
+            data[tf_str] = (df, truncated)
         else:
             print(f"[{symbol}] Warning: Could not fetch {tf_str} data")
     
@@ -196,9 +216,12 @@ def get_processed_training_data(symbol, timeframe_str, n_bars, time_horizon=20):
             print(f"  [{symbol}] Failed to read processed cache: {e}. Re-processing...")
 
     # Load raw data (using the raw cache if available)
-    df = get_historical_data(symbol, timeframe_str, n_bars, use_cache=True)
+    df, truncated = get_historical_data(symbol, timeframe_str, n_bars, use_cache=True)
     if df is None or df.empty:
         return None
+    
+    if truncated:
+        print(f"  [{symbol}] Warning: Data was truncated due to broker history limit")
 
     # Process features
     print(f"  [{symbol}] Computing features and labels...")

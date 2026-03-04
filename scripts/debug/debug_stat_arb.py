@@ -16,10 +16,10 @@ arb = StatArbManager(client)
 symA, symB = "EURUSD", "GBPUSD"
 print(f"\nPulling Data for {symA} / {symB}")
 
-df_a = loader.get_historical_data(symA, "H1", 500)
-df_b = loader.get_historical_data(symB, "H1", 500)
+df_a, truncated_a = loader.get_historical_data(symA, "H1", 500)
+df_b, truncated_b = loader.get_historical_data(symB, "H1", 500)
 
-print(f"Loaded {len(df_a)} bars for A, {len(df_b)} bars for B.")
+print(f"Loaded {len(df_a) if df_a is not None else 0} bars for A, {len(df_b) if df_b is not None else 0} bars for B.")
 
 is_coint, p = arb.check_cointegration(df_a, df_b)
 print(f"Cointegrated: {is_coint} (p-value: {p:.4f})")

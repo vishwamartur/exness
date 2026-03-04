@@ -31,22 +31,20 @@ warnings.filterwarnings('ignore')
 
 from utils.triple_barrier import apply_triple_barrier as apply_atr_barrier
 
-def create_sequences(X, y, seq_length=60):
+from sklearn.preprocessing import StandardScaler
+
+def create_sequences(X_vals, y_vals, seq_length=60):
     """
-    Builds sliding windows.
-    X: (samples, features)
-    y: (samples)
-    Returns: X_seq (samples-seq_len, seq_len, features), y_seq (samples-seq_len,)
+    Builds sliding windows using zero-copy numpy stride tricks.
     """
-    xs, ys = [], []
-    for i in range(len(X) - seq_length):
-        x_window = X.iloc[i:i+seq_length].values
-        # The target corresponds to the prediction for the bar immediately following the window!
-        y_val = y.iloc[i+seq_length-1]
-        xs.append(x_window)
-        ys.append(y_val)
+    if len(X_vals) <= seq_length:
+        return np.array([]), np.array([])
         
-    return np.array(xs), np.array(ys)
+    X_seq = np.lib.stride_tricks.sliding_window_view(X_vals, (seq_length, X_vals.shape[1])).squeeze(1)
+    
+    X_seq = X_seq[:-1]
+    y_seq = y_vals[seq_length:]
+    return X_seq, y_seq
 
 def train():
     """Train Sequence Transformer Model on Key Symbols."""
@@ -56,6 +54,9 @@ def train():
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"\n[INFO] Using device: {device}")
+    if device == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        print(f"[INFO] GPU: {torch.cuda.get_device_name(0)} (cuDNN Benchmark Enabled)")
     
     client = MT5Client()
     if not client.connect() or not client.detect_available_symbols():
@@ -71,9 +72,10 @@ def train():
     
     SEQ_LENGTH = 60 # 60 M15 bars = 15 hours of microstructure
     
+    all_data_dicts = []
+    
     for i, symbol in enumerate(train_symbols, 1):
         print(f"  [{i}/{len(train_symbols)}] {symbol:12} ", end="", flush=True)
-        # Fetch fully processed and labeled data from cache (or compute and cache if not present)
         df = loader.get_processed_training_data(symbol, "M15", settings.HISTORY_BARS)
         
         if df is None or df.empty:
@@ -82,32 +84,36 @@ def train():
             
         print(f"✓ {len(df)} bars")
         
-        # Select Features
         exclude_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'spread', 'real_volume', 'target', 'symbol']
         feature_cols = [c for c in df.columns if c not in exclude_cols and df[c].dtype in [np.float64, np.float32, np.int64, np.int32]]
         
         X = df[feature_cols].copy()
-        X = X.replace([np.inf, -np.inf], np.nan).fillna(X.mean())
-        # DOWNCAST to float32 immediately to halve RAM footprint before creating sequences
-        X = X.astype(np.float32)
-        y = df['target'].copy().astype(int)
+        X = X.replace([np.inf, -np.inf], np.nan).fillna(X.mean()).astype(np.float32)
+        y = df['target'].copy().values.astype(int)
         
-        # Build Windows
-        X_seq, y_seq = create_sequences(X, y, seq_length=SEQ_LENGTH)
+        all_data_dicts.append({"symbol": symbol, "X": X.values, "y": y})
         
-        print(f"✓ {len(X_seq)} sequences | Win Rate: {y_seq.mean():.2%}")
-        all_X_seq.append((X_seq, symbol))
-        all_y_seq.append(y_seq)
-        
-    if not all_X_seq:
-        print("\n❌ No sequences collected. Exiting.")
+    if not all_data_dicts:
+        print("\n❌ No data collected. Exiting.")
         return
         
-    # We must horizontally stack the numpy arrays
-    X_combined = np.concatenate([x for x, _ in all_X_seq], axis=0)
+    print(f"\n[STAGE 2] Global Scaling & Sequence Preparation")
+    scaler = StandardScaler()
+    for d in all_data_dicts:
+        scaler.partial_fit(d["X"])
+        
+    for d in all_data_dicts:
+        X_scaled = scaler.transform(d["X"]).astype(np.float32)
+        X_seq, y_seq = create_sequences(X_scaled, d["y"], seq_length=SEQ_LENGTH)
+        
+        if len(X_seq) > 0:
+            all_X_seq.append(X_seq)
+            all_y_seq.append(y_seq)
+            print(f"  [{d['symbol']}] Created {len(X_seq):,} sequences | Win Rate: {y_seq.mean():.2%}")
+            
+    X_combined = np.concatenate(all_X_seq, axis=0)
     y_combined = np.concatenate(all_y_seq, axis=0)
     
-    print(f"\n[STAGE 2] Sequence Preparation")
     print(f"  Total Sequences:      {len(X_combined):,}")
     print(f"  Input Features:       {X_combined.shape[2]}")
     print(f"  Sequence Length:      {SEQ_LENGTH} steps")
@@ -140,7 +146,7 @@ def train():
     predictor.feature_cols = feature_cols
     
     print(f"  Training for up to 50 epochs (patience 10)...")
-    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=32, verbose=True)
+    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=128, verbose=True, predefined_scaler=scaler, feature_cols=feature_cols)
     
     # Evaluation (Batch the predictions to avoid memory spikes)
     print(f"\n[STAGE 5] Validation & Evaluation")

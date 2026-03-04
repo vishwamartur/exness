@@ -121,8 +121,8 @@ def run_walkforward():
     for i, symbol in enumerate(all_symbols, 1):
         print(f"  [{i:02d}/{total}] {symbol:<12}", end="  ")
         try:
-            df = loader.get_historical_data(symbol, TIMEFRAME, BARS_PER_SYMBOL)
-            if df is None or df.empty:
+            df, truncated = loader.get_historical_data(symbol, TIMEFRAME, BARS_PER_SYMBOL)
+            if df is None or df.empty or truncated:
                 print("SKIP (no data)")
                 continue
 

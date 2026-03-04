@@ -87,15 +87,15 @@ USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Cri
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))  # Quarter-Kelly (safer, avoids ruin)
 KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))   # Min trades before Kelly activates
 
-# Cost Awareness
+# Cost Awareness (Critical for Retail Traders)
 COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
-MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 2.0)) # Profit must cover Commission x 2
+MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit must cover Commission x 3
 
 
 #─── Trade Management────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 300))  # 1 minute between trades (reduced from 5 min)
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 1800))  # 30 minutes between trades (HFT disabled for retail)
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 5))     # Lower frequency means higher quality selection
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 2))     # STRICT: 2 max per symbol (Quality over Quantity)
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 5.0)) # Hard stop if daily loss > $5
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 3))  # Strict: 3 max for micro-account safety
 LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 15)) # Prevents stale limit gaps

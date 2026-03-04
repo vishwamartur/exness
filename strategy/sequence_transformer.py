@@ -162,52 +162,30 @@ class SequenceTransformerPredictor:
         self.criterion = nn.CrossEntropyLoss()
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=5)
 
-    def fit(self, X_seq, y, X_val_seq=None, y_val=None, epochs=50, batch_size=32, verbose=True):
+    def fit(self, X_tensor, y_tensor, X_val_tensor=None, y_val_tensor=None, epochs=50, batch_size=128, verbose=True, predefined_scaler=None, feature_cols=None):
         """
-        Train the model using Sequence Windows.
-        X_seq shape: (num_samples, seq_len, num_features)
-        y shape: (num_samples,)
+        Train the model using pre-scaled Sequence Windows.
+        X_tensor: (num_samples, seq_len, num_features) Tensor or array
+        y_tensor: (num_samples,) Tensor or array
         """
         self.is_fitted = True
-        
-        num_samples, seq_len, num_features = X_seq.shape
-        X_flat = X_seq.reshape(-1, num_features)
-        total_rows = X_flat.shape[0]
-        
-        # Memory-efficient scaling: fit `StandardScaler` incrementally in chunks
-        chunk_size = 500_000
-        for start_idx in range(0, total_rows, chunk_size):
-            end_idx = min(start_idx + chunk_size, total_rows)
-            # We must use partial_fit to avoid OOM
-            self.scaler.partial_fit(X_flat[start_idx:end_idx])
+        if predefined_scaler is not None:
+            self.scaler = predefined_scaler
+        if feature_cols is not None:
+            self.feature_cols = feature_cols
             
-        # Transform incrementally as well to avoid allocating a massive contiguous scaled block
-        X_scaled_flat = np.empty_like(X_flat, dtype=np.float32)
-        for start_idx in range(0, total_rows, chunk_size):
-            end_idx = min(start_idx + chunk_size, total_rows)
-            X_scaled_flat[start_idx:end_idx] = self.scaler.transform(X_flat[start_idx:end_idx])
+        # Ensure Tensors
+        if not isinstance(X_tensor, torch.Tensor):
+            X_tensor = torch.as_tensor(X_tensor, dtype=torch.float32)
+        if not isinstance(y_tensor, torch.Tensor):
+            y_tensor = torch.as_tensor(y_tensor, dtype=torch.long)
             
-        X_scaled = X_scaled_flat.reshape(num_samples, seq_len, num_features)
-        
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-        y_tensor = torch.tensor(y, dtype=torch.long)
-        
-        # Validation data (Handle scaling securely in chunks if large)
-        has_val = X_val_seq is not None and y_val is not None
+        has_val = X_val_tensor is not None and y_val_tensor is not None
         if has_val:
-            val_samples, _, _ = X_val_seq.shape
-            X_val_flat = X_val_seq.reshape(-1, num_features)
-            val_total_rows = X_val_flat.shape[0]
-            
-            X_val_scaled_flat = np.empty_like(X_val_flat, dtype=np.float32)
-            for start_idx in range(0, val_total_rows, chunk_size):
-                end_idx = min(start_idx + chunk_size, val_total_rows)
-                X_val_scaled_flat[start_idx:end_idx] = self.scaler.transform(X_val_flat[start_idx:end_idx])
-                
-            X_val_scaled = X_val_scaled_flat.reshape(val_samples, seq_len, num_features)
-            
-            X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)
-            y_val_tensor = torch.tensor(y_val, dtype=torch.long)
+            if not isinstance(X_val_tensor, torch.Tensor):
+                X_val_tensor = torch.as_tensor(X_val_tensor, dtype=torch.float32)
+            if not isinstance(y_val_tensor, torch.Tensor):
+                y_val_tensor = torch.as_tensor(y_val_tensor, dtype=torch.long)
             
         best_val_acc = 0
         patience_counter = 0
@@ -239,10 +217,23 @@ class SequenceTransformerPredictor:
             if has_val:
                 self.model.eval()
                 with torch.no_grad():
-                    X_val_batch = X_val_tensor.to(self.device)
-                    y_val_batch = y_val_tensor.to(self.device)
-                    val_logits = self.model(X_val_batch)
-                    val_acc = (val_logits.argmax(dim=1) == y_val_batch).float().mean().item()
+                    correct = 0
+                    total = 0
+                    # Evaluate in batches to prevent CUDA OOM
+                    for j in range(0, len(X_val_tensor), batch_size):
+                        X_val_batch = X_val_tensor[j:j+batch_size].to(self.device)
+                        y_val_batch = y_val_tensor[j:j+batch_size].to(self.device)
+                        
+                        val_logits = self.model(X_val_batch)
+                        correct += (val_logits.argmax(dim=1) == y_val_batch).sum().item()
+                        total += len(y_val_batch)
+                        
+                    # Guard against empty validation set
+                    if total > 0:
+                        val_acc = correct / total
+                    else:
+                        val_acc = 0.0
+                        if verbose: print(f"Epoch {epoch+1}: Empty validation set encountered")
                     
                     self.lr_scheduler.step(val_acc)
                     

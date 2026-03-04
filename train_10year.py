@@ -283,9 +283,9 @@ def collect_data(symbols, timeframe=TIMEFRAME, bars=BARS_10_YEARS):
         print(f"[{i}/{len(symbols)}] {symbol}...", end=" ", flush=True)
         
         try:
-            df = loader.get_historical_data(symbol, timeframe, bars)
+            df, truncated = loader.get_historical_data(symbol, timeframe, bars)
             
-            if df is None or len(df) < MIN_BARS_PER_SYMBOL:
+            if df is None or len(df) < MIN_BARS_PER_SYMBOL or truncated:
                 print(f"Skipped (only {len(df) if df is not None else 0} bars)")
                 continue
             

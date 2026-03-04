@@ -204,8 +204,8 @@ class AutoTrainer:
         try:
             # Fetch fresh data
             symbol = settings.SYMBOLS[0] if settings.SYMBOLS else "EURUSD"
-            df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-            if df is None or len(df) < 500:
+            df, truncated = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
+            if df is None or len(df) < 500 or truncated:
                 print("[AUTO-TRAIN] Not enough data for RF retrain")
                 return
 
@@ -285,8 +285,8 @@ class AutoTrainer:
 
         try:
             symbol = settings.SYMBOLS[0] if settings.SYMBOLS else "EURUSD"
-            df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-            if df is None or len(df) < 500:
+            df, truncated = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
+            if df is None or len(df) < 500 or truncated:
                 print("[AUTO-TRAIN] Not enough data for XGBoost")
                 return
 
@@ -373,8 +373,8 @@ class AutoTrainer:
             if actual_sym is None:
                 actual_sym = symbol
 
-            df = loader.get_historical_data(actual_sym, "M15", settings.HISTORY_BARS)
-            if df is None or len(df) < 500:
+            df, truncated = loader.get_historical_data(actual_sym, "M15", settings.HISTORY_BARS)
+            if df is None or len(df) < 500 or truncated:
                 print(f"[AUTO-TRAIN] Not enough data for {symbol}")
                 return
 
