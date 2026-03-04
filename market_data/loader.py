@@ -52,11 +52,26 @@ def initial_connect():
     return True
 
 
-def get_historical_data(symbol, timeframe_str, n_bars):
+def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
     """
     Fetches historical bars from MT5.
     For large requests (>50k bars), fetches in chunks.
+    Can cache results to disk to speed up repeated model training.
     """
+    # ─── Cache Check ─────────────────────────────────────────────────────
+    cache_path = None
+    if use_cache and n_bars > MT5_MAX_BARS:
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data_cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, f"{symbol}_{timeframe_str}_{n_bars}.pkl")
+        
+        if os.path.exists(cache_path):
+            print(f"  [{symbol}] Loading {n_bars:,} bars from local cache...")
+            try:
+                return pd.read_pickle(cache_path)
+            except Exception as e:
+                print(f"  [{symbol}] Failed to read cache: {e}. Re-fetching...")
+
     if not mt5.terminal_info():
         if not initial_connect():
             return None
@@ -128,6 +143,15 @@ def get_historical_data(symbol, timeframe_str, n_bars):
     df['time'] = pd.to_datetime(df['time'], unit='s')
     
     print(f"Got {len(df):,} bars")
+    
+    # ─── Save to Cache ───────────────────────────────────────────────────
+    if cache_path is not None:
+        try:
+            df.to_pickle(cache_path)
+            print(f"  [{symbol}] Saved {len(df):,} bars to local cache.")
+        except Exception as e:
+            print(f"  [{symbol}] Warning: Failed to save cache: {e}")
+            
     return df
 
 
