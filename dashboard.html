@@ -75,12 +75,20 @@
 </head>
 
 <body class="h-screen flex flex-col overflow-hidden">
-    <!-- Header -->
     <header class="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/80">
-        <div class="flex items-center gap-3">
-            <i data-lucide="cpu" class="text-indigo-400"></i>
-            <h1 class="font-bold text-lg tracking-tight">Trading<span class="text-indigo-400">Agents</span> v2.2</h1>
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3 mr-8">
+                <i data-lucide="cpu" class="text-indigo-400"></i>
+                <h1 class="font-bold text-lg tracking-tight">Trading<span class="text-indigo-400">Agents</span> v2.2</h1>
+            </div>
+            
+            <!-- Nav Tabs -->
+            <div class="flex items-center gap-6 mt-1">
+                <button onclick="switchTab('live')" id="tab-live" class="text-indigo-400 border-b-2 border-indigo-400 pb-2 px-1 text-sm font-semibold transition-colors">Live Operations</button>
+                <button onclick="switchTab('journal')" id="tab-journal" class="text-slate-400 hover:text-white border-b-2 border-transparent pb-2 px-1 text-sm font-semibold transition-colors">Trading Journal</button>
+            </div>
         </div>
+        
         <div class="flex items-center gap-4">
             <!-- Forex Session Clocks -->
             <div id="forex-sessions"></div>
@@ -92,8 +100,8 @@
         </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="flex-1 flex gap-6 p-6 overflow-hidden">
+    <!-- Main Content: Live Operations -->
+    <main id="view-live" class="flex-1 flex gap-6 p-6 overflow-hidden fade-in">
 
         <!-- Left: Live Feed -->
         <div class="w-1/3 flex flex-col gap-4">
@@ -144,6 +152,68 @@
                 </div>
             </div>
 
+        </div>
+    </main>
+
+    <!-- Main Content: Trading Journal -->
+    <main id="view-journal" class="hidden flex-1 flex gap-6 p-6 overflow-hidden">
+        <div class="w-full flex flex-col gap-6 fade-in h-full">
+            <!-- Journal Top Stats -->
+            <div class="grid grid-cols-4 gap-4 shrink-0">
+                <div class="card p-4 rounded-xl">
+                    <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wider">Today's P/L</div>
+                    <div id="journal-pl" class="text-3xl font-bold text-slate-200 mt-2">$0.00</div>
+                </div>
+                <div class="card p-4 rounded-xl">
+                    <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wider">Win Rate</div>
+                    <div id="journal-wr" class="text-3xl font-bold text-white mt-2">0.0%</div>
+                </div>
+                <div class="card p-4 rounded-xl">
+                    <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wider">Trades Taken</div>
+                    <div id="journal-total" class="text-3xl font-bold text-indigo-400 mt-2">0</div>
+                </div>
+                <div class="card p-4 rounded-xl">
+                    <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wider">Avg Reward/Risk</div>
+                    <div id="journal-rr" class="text-3xl font-bold text-emerald-400 mt-2">0.0</div>
+                </div>
+            </div>
+            
+            <div class="flex gap-6 flex-1 min-h-0">
+                <!-- Confluence Edge Analysis -->
+                <div class="card p-6 rounded-xl w-1/3 flex flex-col h-full">
+                     <h2 class="text-sm font-semibold text-slate-400 mb-6 flex items-center justify-between">
+                         <div class="flex items-center gap-2"><i data-lucide="target" class="w-4 h-4"></i> Edge Analysis</div>
+                         <span class="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400">Win Rate by Confluence</span>
+                     </h2>
+                     <div id="confluence-panel" class="flex-1 overflow-y-auto space-y-5 pr-2">
+                         <div class="text-slate-500 text-sm text-center mt-10">Loading edge data...</div>
+                     </div>
+                </div>
+                
+                <!-- Trade History -->
+                <div class="card p-6 rounded-xl w-2/3 flex flex-col h-full">
+                     <h2 class="text-sm font-semibold text-slate-400 mb-4 flex items-center justify-between">
+                         <div class="flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Trade History</div>
+                     </h2>
+                     <div class="flex-1 overflow-y-auto pr-2">
+                         <table class="w-full text-left">
+                             <thead class="sticky top-0 bg-[#1e293b] shadow-[0_10px_10px_-10px_rgba(0,0,0,0.5)] z-10">
+                                 <tr class="text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
+                                     <th class="pb-3 pt-2 font-semibold">Time</th>
+                                     <th class="pb-3 pt-2 font-semibold">Symbol</th>
+                                     <th class="pb-3 pt-2 font-semibold">Dir</th>
+                                     <th class="pb-3 pt-2 font-semibold">Entry</th>
+                                     <th class="pb-3 pt-2 font-semibold">Exit</th>
+                                     <th class="pb-3 pt-2 font-semibold text-right">Profit</th>
+                                 </tr>
+                             </thead>
+                             <tbody id="trade-history-body" class="text-slate-300">
+                                 <tr><td colspan="6" class="text-center text-slate-500 py-10">Loading trades...</td></tr>
+                             </tbody>
+                         </table>
+                     </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -327,6 +397,7 @@
                     <div class="flex-1 bg-slate-900/50 p-4 rounded-lg border border-slate-800 overflow-y-auto">
                         <h4 class="text-xs uppercase tracking-wider text-slate-500 mb-2">Researcher Verdict</h4>
                         <p class="text-lg leading-relaxed text-slate-200">"${msg.reason}"</p>
+                        ${msg.ml_prob ? `<p class="text-xs text-indigo-400 mt-4 mono">ML Direction Prob: ${msg.ml_prob}%</p>` : ''}
                     </div>
                     <div class="flex items-center gap-2">
                         <div class="h-2 flex-1 bg-slate-800 rounded-full overflow-hidden">
@@ -338,7 +409,103 @@
             `;
         }
 
+        /* ────────────────────────────────────────────────────
+         *  Trading Journal Nav & Fetch
+         * ────────────────────────────────────────────────────*/
+        let journalRefreshInterval = null;
+
+        function switchTab(tab) {
+            if(tab === 'live') {
+                document.getElementById('view-live').classList.remove('hidden');
+                document.getElementById('view-journal').classList.add('hidden');
+                document.getElementById('tab-live').className = "text-indigo-400 border-b-2 border-indigo-400 pb-2 px-1 text-sm font-semibold transition-colors";
+                document.getElementById('tab-journal').className = "text-slate-400 hover:text-white border-b-2 border-transparent pb-2 px-1 text-sm font-semibold transition-colors";
+                if(journalRefreshInterval) clearInterval(journalRefreshInterval);
+            } else {
+                document.getElementById('view-live').classList.add('hidden');
+                document.getElementById('view-journal').classList.remove('hidden');
+                document.getElementById('tab-live').className = "text-slate-400 hover:text-white border-b-2 border-transparent pb-2 px-1 text-sm font-semibold transition-colors";
+                document.getElementById('tab-journal').className = "text-indigo-400 border-b-2 border-indigo-400 pb-2 px-1 text-sm font-semibold transition-colors";
+                
+                fetchJournalData();
+                journalRefreshInterval = setInterval(fetchJournalData, 10000);
+            }
+        }
+
+        async function fetchJournalData() {
+            try {
+                const apiBase = 'http://' + window.location.hostname + ':8000/api';
+                const [dailyRes, confRes, tradesRes] = await Promise.all([
+                    fetch(`${apiBase}/journal/daily`),
+                    fetch(`${apiBase}/journal/confluence`),
+                    fetch(`${apiBase}/journal/trades?limit=50`)
+                ]);
+                const daily = await dailyRes.json();
+                const conf = await confRes.json();
+                const trades = await tradesRes.json();
+                
+                // Render Top Stats
+                const plEl = document.getElementById('journal-pl');
+                plEl.innerText = `$${daily.total_profit.toFixed(2)}`;
+                plEl.className = `text-3xl font-bold mt-2 ${daily.total_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+                
+                document.getElementById('journal-wr').innerText = `${daily.win_rate.toFixed(1)}%`;
+                document.getElementById('journal-total').innerText = daily.total;
+                document.getElementById('journal-rr').innerText = daily.avg_rr.toFixed(2);
+                
+                // Render Trades
+                const tbody = document.getElementById('trade-history-body');
+                tbody.innerHTML = trades.map(t => {
+                    const time = new Date(t.entry_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                    const color = t.profit >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    const dirColor = t.direction === 'BUY' ? 'text-emerald-400' : 'text-rose-400';
+                    const exit = t.exit_price || '-';
+                    const profit = t.profit !== null ? `$${t.profit.toFixed(2)}` : 'OPEN';
+                    return `<tr class="border-b border-slate-800/40 hover:bg-slate-800/20 transition-colors group">
+                        <td class="py-3 text-[11px] text-slate-500 font-mono">${time}</td>
+                        <td class="py-3 font-semibold text-slate-200">${t.symbol}</td>
+                        <td class="py-3 font-bold text-xs ${dirColor}">${t.direction}</td>
+                        <td class="py-3 mono text-xs text-slate-400">${t.entry_price}</td>
+                        <td class="py-3 mono text-xs text-slate-400">${exit}</td>
+                        <td class="py-3 text-right mono text-xs font-bold ${color} group-hover:brightness-125">${profit}</td>
+                    </tr>`;
+                }).join('');
+                
+                // Render Confluence
+                const confPanel = document.getElementById('confluence-panel');
+                const sortedConf = Object.keys(conf).sort((a,b) => conf[b].win_rate - conf[a].win_rate);
+                
+                if (sortedConf.length === 0) {
+                    confPanel.innerHTML = '<div class="text-slate-500 text-sm text-center mt-10">No confluence data yet...</div>';
+                } else {
+                    confPanel.innerHTML = sortedConf.map(factor => {
+                        const data = conf[factor];
+                        if(data.total < 3) return ''; // filter tiny samples
+                        const pctStr = data.win_rate.toFixed(1) + '%';
+                        const barColor = data.win_rate >= 50 ? 'bg-indigo-500' : 'bg-amber-500';
+                        const textColor = data.win_rate >= 50 ? 'text-indigo-400' : 'text-amber-400';
+                        
+                        return `
+                        <div class="mb-4">
+                            <div class="flex justify-between items-end mb-1.5">
+                                <span class="text-slate-300 text-sm font-medium tracking-wide truncate pr-2" title="${factor}">${factor.replace(/_/g, ' ')}</span>
+                                <span class="text-xs font-bold ${textColor}">${pctStr}</span>
+                            </div>
+                            <div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                <div class="h-full ${barColor} transition-all duration-1000 ease-out" style="width: ${data.win_rate}%"></div>
+                            </div>
+                            <div class="text-[10px] text-slate-500 mt-1.5 text-right tracking-wider uppercase">${data.wins}W / ${data.total}T</div>
+                        </div>`;
+                    }).join('');
+                }
+                
+            } catch(e) {
+                console.error("Journal fetch error", e);
+            }
+        }
+
         connect();
+        lucide.createIcons();
     </script>
 </body>
 
