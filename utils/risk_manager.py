@@ -265,12 +265,15 @@ class RiskManager:
         # Reject any trade where total cost (spread + commission) exceeds 30% of expected profit.
         try:
             tick = mt5.symbol_info_tick(symbol)
-            if tick:
+            sym_info = mt5.symbol_info(symbol)
+            if not tick or not sym_info:
+                print(f"[RISK] Warning: profitability gate skipped for {symbol} — no tick/symbol info")
+            else:
                 spread = (tick.ask - tick.bid)
                 entry = tick.ask if direction == "BUY" else tick.bid
                 gross_profit_points = abs(tp - entry)
                 
-                point = tick.point
+                point = sym_info.point
                 if point == 0: point = 0.00001
                 
                 spread_pips = spread / point
@@ -291,7 +294,7 @@ class RiskManager:
                     return False, f"Low Net Profit ({net_pips:.1f} < {min_net:.1f} pips)"
                     
         except Exception as e:
-            pass # Don't block on calculation error
+            print(f"[RISK] Warning: profitability gate error for {symbol}: {e}")
             
         return True, "OK"
 

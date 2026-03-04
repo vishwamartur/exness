@@ -48,52 +48,13 @@ def train():
     for i, symbol in enumerate(settings.SYMBOLS, 1):
         print(f"[{i}/{total_symbols}] Processing {symbol}...", end="\r")
         
-        # Fetch data
-        df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-        if df is None or df.empty:
-            continue
-            
-        # Feature Engineering
-        try:
-            df = features.add_technical_features(df)
-            
-            # Labelling
-            df['target'] = apply_atr_barrier(
-                df, 
-                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
-                atr_sl_mult=settings.ATR_SL_MULTIPLIER,
-                time_horizon=20
-            )
-            
-            # Drop recent data that can't be labelled yet
-            df = df.iloc[:-21].dropna()
-            
-            # Add symbol encoding (one-hot or categorical)
-            # This helps the model learn symbol-specific patterns
-            df['symbol_id'] = hash(symbol) % 1000  # Simple hash for symbol identification
-            
-            # Add symbol volatility class
-            atr_mean = df['atr'].mean() if 'atr' in df.columns else 0
-            close_mean = df['close'].mean()
-            vol_ratio = atr_mean / close_mean if close_mean > 0 else 0
-            
-            # Assign volatility class based on ratio
-            if vol_ratio < 0.0005:
-                vol_class = 0  # Low volatility (major forex)
-            elif vol_ratio < 0.001:
-                vol_class = 1  # Medium-low volatility
-            elif vol_ratio < 0.005:
-                vol_class = 2  # Medium volatility (commodities)
-            else:
-                vol_class = 3  # High volatility (crypto)
-            
-            df['volatility_class'] = vol_class
-            
+        # Fetch fully processed and labeled data from cache (or compute and cache if not present)
+        df = loader.get_processed_training_data(symbol, "M15", settings.HISTORY_BARS)
+        
+        if df is not None and not df.empty:
             all_data.append(df)
-            
-        except Exception as e:
-            print(f"\nError processing {symbol}: {e}")
-            continue
+        else:
+            print(f"❌ Failed to process data for {symbol}")
 
     if not all_data:
         print("No valid data collected from any symbol.")

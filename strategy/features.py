@@ -215,10 +215,13 @@ def add_technical_features(df):
         df['frac_diff_close'] = 0.0
 
     # ─── 11. Lag Features ────────────────────────────────────────────────
+    lag_feats = {}
     for lag in [1, 2, 3, 5]:
-        df[f'log_ret_lag_{lag}'] = df['log_ret'].shift(lag)
-        df[f'rsi_lag_{lag}'] = df['rsi'].shift(lag)
-        df[f'macd_diff_lag_{lag}'] = df['macd_diff'].shift(lag)
+        lag_feats[f'log_ret_lag_{lag}'] = df['log_ret'].shift(lag)
+        lag_feats[f'rsi_lag_{lag}'] = df['rsi'].shift(lag)
+        lag_feats[f'macd_diff_lag_{lag}'] = df['macd_diff'].shift(lag)
+        
+    df = pd.concat([df, pd.DataFrame(lag_feats, index=df.index)], axis=1)
 
     # Clean NaN values
     df.replace([np.inf, -np.inf], np.nan, inplace=True)

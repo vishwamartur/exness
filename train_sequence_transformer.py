@@ -73,19 +73,15 @@ def train():
     
     for i, symbol in enumerate(train_symbols, 1):
         print(f"  [{i}/{len(train_symbols)}] {symbol:12} ", end="", flush=True)
-        df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
-        if df is None or len(df) < 500:
-            print("❌ Not enough data")
+        # Fetch fully processed and labeled data from cache (or compute and cache if not present)
+        df = loader.get_processed_training_data(symbol, "M15", settings.HISTORY_BARS)
+        
+        if df is None or df.empty:
+            print("❌ Failed to process data")
             continue
             
-        try:
-            df = features.add_technical_features(df)
-            df['target'] = apply_atr_barrier(df, settings.ATR_TP_MULTIPLIER, settings.ATR_SL_MULTIPLIER)
-            df.dropna(inplace=True)
-        except Exception as e:
-            print(f"❌ Feature error: {e}")
-            continue
-            
+        print(f"✓ {len(df)} bars")
+        
         # Select Features
         exclude_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'spread', 'real_volume', 'target', 'symbol']
         feature_cols = [c for c in df.columns if c not in exclude_cols and df[c].dtype in [np.float64, np.float32, np.int64, np.int32]]

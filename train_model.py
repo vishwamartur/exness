@@ -79,26 +79,11 @@ def train():
     for i, symbol in enumerate(all_symbols, 1):
         print(f"[{i:02d}/{total}] {symbol:<12}", end="  ")
         try:
-            df = loader.get_historical_data(symbol, "M1", M1_BARS_PER_SYMBOL)
+            # Fetch fully processed and labeled data from cache (or compute and cache if not present)
+            df = loader.get_processed_training_data(symbol, "M1", M1_BARS_PER_SYMBOL, time_horizon=SCALP_HORIZON)
+            
             if df is None or df.empty:
-                print("SKIP (no data)")
-                continue
-
-            df = features.add_technical_features(df)
-            if df.empty:
-                print("SKIP (features empty)")
-                continue
-
-            df['target'] = apply_atr_barrier(
-                df,
-                atr_tp_mult=settings.ATR_TP_MULTIPLIER,
-                atr_sl_mult=settings.ATR_SL_MULTIPLIER,
-                time_horizon=SCALP_HORIZON
-            )
-
-            df = df.iloc[:-SCALP_HORIZON].dropna()
-            if len(df) < 100:
-                print(f"SKIP (too few rows: {len(df)})")
+                print("SKIP (no data / failed to process)")
                 continue
 
             all_data.append(df)

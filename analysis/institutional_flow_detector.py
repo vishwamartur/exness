@@ -506,6 +506,10 @@ class InstitutionalFlowDetector:
         Returns:
             (should_block: bool, reason: str)
         """
+        # Non-actionable directions (NEUTRAL, HOLD, etc.) — nothing to validate
+        if trade_direction not in ('BUY', 'SELL'):
+            return False, "No actionable direction to validate"
+
         score = score_data.get('score', 0)
         flow_dir = score_data.get('direction', 'NEUTRAL')
 
@@ -513,7 +517,7 @@ class InstitutionalFlowDetector:
             return False, "Institutional flow too weak to determine"
 
         # Map trade direction to flow direction
-        trade_flow = 'BULLISH' if trade_direction == 'BUY' else 'BEARISH'
+        trade_flow = {'BUY': 'BULLISH', 'SELL': 'BEARISH'}[trade_direction]
 
         if flow_dir == 'NEUTRAL':
             return False, "Institutional flow is neutral"
@@ -531,9 +535,12 @@ class InstitutionalFlowDetector:
         Returns position scaling factor based on institutional alignment.
         1.0 = normal, 1.5 = very strong alignment.
         """
+        if trade_direction not in ('BUY', 'SELL'):
+            return 1.0  # Non-actionable direction — no scaling
+
         score = score_data.get('score', 0)
         flow_dir = score_data.get('direction', 'NEUTRAL')
-        trade_flow = 'BULLISH' if trade_direction == 'BUY' else 'BEARISH'
+        trade_flow = {'BUY': 'BULLISH', 'SELL': 'BEARISH'}[trade_direction]
 
         if flow_dir == trade_flow:
             if score >= 80:
