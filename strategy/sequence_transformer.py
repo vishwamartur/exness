@@ -239,10 +239,18 @@ class SequenceTransformerPredictor:
             if has_val:
                 self.model.eval()
                 with torch.no_grad():
-                    X_val_batch = X_val_tensor.to(self.device)
-                    y_val_batch = y_val_tensor.to(self.device)
-                    val_logits = self.model(X_val_batch)
-                    val_acc = (val_logits.argmax(dim=1) == y_val_batch).float().mean().item()
+                    correct = 0
+                    total = 0
+                    # Evaluate in batches to prevent CUDA OOM
+                    for j in range(0, len(X_val_tensor), batch_size):
+                        X_val_batch = X_val_tensor[j:j+batch_size].to(self.device)
+                        y_val_batch = y_val_tensor[j:j+batch_size].to(self.device)
+                        
+                        val_logits = self.model(X_val_batch)
+                        correct += (val_logits.argmax(dim=1) == y_val_batch).sum().item()
+                        total += len(y_val_batch)
+                        
+                    val_acc = correct / total
                     
                     self.lr_scheduler.step(val_acc)
                     

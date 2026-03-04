@@ -143,7 +143,7 @@ def train():
     predictor.feature_cols = feature_cols
     
     print(f"  Training for up to 50 epochs (patience 10)...")
-    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=512, verbose=True)
+    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=128, verbose=True)
     
     # Evaluation (Batch the predictions to avoid memory spikes)
     print(f"\n[STAGE 5] Validation & Evaluation")
