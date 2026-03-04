@@ -165,6 +165,7 @@ def add_technical_features(df):
     df = _add_order_blocks(df)
     df = _add_fair_value_gaps(df)
     df = _add_liquidity_levels(df)
+    df = _add_tradezella_patterns(df)
 
     # ─── 7. Time-of-Day / Day-of-Week Features (Session Encoding) ────────
     # Forex behavior changes dramatically across sessions (Asian/London/NY).
@@ -429,6 +430,66 @@ def _add_liquidity_levels(df, lookback=20):
                              (df['close'] < df['liq_high'].shift(1))).astype(int)
     df['liq_sweep_low'] = ((df['low'] < df['liq_low'].shift(1)) &
                             (df['close'] > df['liq_low'].shift(1))).astype(int)
+
+    return df
+
+
+def _add_tradezella_patterns(df):
+    """
+    Implements quantifiable TradeZella strategy frameworks as machine learning features.
+    
+    Strategies implemented:
+    1. FVG & Liquidity Sweeps (ICT/SMC)
+    2. Bollinger Band Environments (Consolidation/Expansion)
+    3. Break & Retest / EMA Pockets
+    """
+    
+    # ─── 1. FVG & Liquidity Sweep (ICT Model) ──────────────────────────────────
+    # Valid setup: A recent liquidity sweep followed by price returning to an FVG
+    
+    # Check if a sweep happened in the last 5 bars
+    recent_sweep_high = df['liq_sweep_high'].rolling(window=5, min_periods=1).max()
+    recent_sweep_low = df['liq_sweep_low'].rolling(window=5, min_periods=1).max()
+    
+    # Sell Setup: Swept buy-side liquidity (highs), created bearish FVG, and returning to it
+    df['tz_ict_sell_setup'] = ((recent_sweep_high == 1) & (df['near_fvg_bearish'] == 1)).astype(int)
+    
+    # Buy Setup: Swept sell-side liquidity (lows), created bullish FVG, and returning to it
+    df['tz_ict_buy_setup'] = ((recent_sweep_low == 1) & (df['near_fvg_bullish'] == 1)).astype(int)
+    
+
+    # ─── 2. Volatility Environment (BB Strategy) ───────────────────────────────
+    # Identify whether the market is squeezing, expanding, or reverting
+    
+    avg_bb_width = df['bb_width'].rolling(window=50, min_periods=10).mean()
+    
+    # 0 = Normal, 1 = Squeeze (Consolidation), 2 = Expansion (Trend)
+    df['tz_bb_env'] = 0
+    df.loc[df['bb_width'] < avg_bb_width * 0.8, 'tz_bb_env'] = 1  # Squeeze
+    df.loc[df['bb_width'] > avg_bb_width * 1.2, 'tz_bb_env'] = 2  # Expansion
+    
+    # Trend alignment during expansion (1 = Bullish Trend, -1 = Bearish Trend, 0 = N/A)
+    df['tz_bb_trend'] = 0
+    df.loc[(df['tz_bb_env'] == 2) & (df['close'] > df['sma_20']), 'tz_bb_trend'] = 1
+    df.loc[(df['tz_bb_env'] == 2) & (df['close'] < df['sma_20']), 'tz_bb_trend'] = -1
+
+    
+    # ─── 3. Break & Retest (EMA Pocket Strategy) ───────────────────────────────
+    # Valid setup: Broke market structure recently, now pulling back to 21 EMA
+    
+    if 'bos_bullish' in df.columns and 'bos_bearish' in df.columns:
+        recent_bos_bullish = df['bos_bullish'].rolling(window=10, min_periods=1).max()
+        recent_bos_bearish = df['bos_bearish'].rolling(window=10, min_periods=1).max()
+        
+        # Near EMA 21 definition (less than 0.1% away)
+        near_ema_21 = (df['close'] - df['ema_21']).abs() / df['close'] < 0.001
+        
+        # Pullback needs to be a retracement, so for buy, price should be touching EMA from above
+        df['tz_break_retest_buy'] = ((recent_bos_bullish == 1) & near_ema_21 & (df['close'] >= df['ema_21'])).astype(int)
+        df['tz_break_retest_sell'] = ((recent_bos_bearish == 1) & near_ema_21 & (df['close'] <= df['ema_21'])).astype(int)
+    else:
+        df['tz_break_retest_buy'] = 0
+        df['tz_break_retest_sell'] = 0
 
     return df
 
