@@ -69,25 +69,13 @@ def train():
     for i, symbol in enumerate(settings.SYMBOLS, 1):
         print(f"  [{i}/{total_symbols}] {symbol:12} ", end="", flush=True)
         
-        # Fetch data
-        df = loader.get_historical_data(symbol, "M15", settings.HISTORY_BARS)
+        # Fetch fully processed and labeled data from cache (or compute and cache if not present)
+        df = loader.get_processed_training_data(symbol, "M15", settings.HISTORY_BARS)
+        
         if df is None or df.empty:
-            print("❌ No data")
+            print("❌ Failed to process data")
             continue
             
-        # Feature Engineering
-        try:
-            df = features.add_technical_features(df)
-            if df.empty or len(df) < 100:
-                print(f"❌ Too few samples ({len(df)})")
-                continue
-        except Exception as e:
-            print(f"❌ Feature error: {e}")
-            continue
-        
-        # Labelling
-        df['target'] = apply_atr_barrier(df, settings.ATR_TP_MULTIPLIER, settings.ATR_SL_MULTIPLIER)
-        
         # Balance check
         label_dist = df['target'].value_counts()
         if 1 not in label_dist:
