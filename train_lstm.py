@@ -35,7 +35,7 @@ from market_data import loader
 from config import settings
 
 # Key symbols to train models for
-KEY_SYMBOLS = ["EURUSD", "XAUUSD", "BTCUSD", "GBPUSD"]
+KEY_SYMBOLS = settings.ALL_BASE_SYMBOLS
 
 
 def create_sequences(data, target, seq_length):
