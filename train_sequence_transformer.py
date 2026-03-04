@@ -56,6 +56,9 @@ def train():
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"\n[INFO] Using device: {device}")
+    if device == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        print(f"[INFO] GPU: {torch.cuda.get_device_name(0)} (cuDNN Benchmark Enabled)")
     
     client = MT5Client()
     if not client.connect() or not client.detect_available_symbols():
@@ -140,7 +143,7 @@ def train():
     predictor.feature_cols = feature_cols
     
     print(f"  Training for up to 50 epochs (patience 10)...")
-    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=32, verbose=True)
+    predictor.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=512, verbose=True)
     
     # Evaluation (Batch the predictions to avoid memory spikes)
     print(f"\n[STAGE 5] Validation & Evaluation")

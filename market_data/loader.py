@@ -105,6 +105,7 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
     end_time = datetime.now(timezone.utc)
     remaining = n_bars
     chunk_count = 0
+    prev_oldest_unix = None
     
     while remaining > 0:
         chunk_size = min(remaining, MT5_MAX_BARS)
@@ -115,6 +116,13 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         if rates is None or len(rates) == 0:
             # No more data available
             break
+            
+        # Check if we are stuck polling the same exact chunk of time (e.g. reached broker history limit)
+        current_oldest_unix = rates[0]['time']
+        if prev_oldest_unix is not None and current_oldest_unix >= prev_oldest_unix:
+            print(f"\n  [{symbol}] Reached broker history limit ({chunk_count * MT5_MAX_BARS} bars max).")
+            break
+        prev_oldest_unix = current_oldest_unix
         
         df_chunk = pd.DataFrame(rates)
         all_data.append(df_chunk)
@@ -123,12 +131,12 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
         chunk_count += 1
         
         # Move end_time to before the oldest bar we got
-        oldest_time = datetime.fromtimestamp(rates[0]['time'], tz=timezone.utc)
+        oldest_time = datetime.fromtimestamp(current_oldest_unix, tz=timezone.utc)
         end_time = oldest_time - timedelta(minutes=minutes_per_bar)
         
         # Progress
         if chunk_count % 5 == 0:
-            print(f"{n_bars - remaining:,}...", end=" ")
+            print(f"{n_bars - remaining:,}...", end=" ", flush=True)
         
         # Small delay to avoid overwhelming MT5
         time.sleep(0.1)
