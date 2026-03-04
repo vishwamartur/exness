@@ -176,3 +176,80 @@ def get_multi_timeframe_data(symbol, n_bars_primary=500):
             print(f"[{symbol}] Warning: Could not fetch {tf_str} data")
     
     return data
+
+
+def get_processed_training_data(symbol, timeframe_str, n_bars, time_horizon=20):
+    """
+    Fetches historical data, computes technical features, applies triple barrier labeling,
+    and caches the fully processed DataFrame to disk. 
+    This enables instant loading across all model training scripts (XGBoost, Transformers, RF).
+    """
+    cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"PROCESSED_{symbol}_{timeframe_str}_{n_bars}_h{time_horizon}.pkl")
+    
+    if os.path.exists(cache_path):
+        print(f"  [{symbol}] Loading {n_bars:,} PROCESSED bars from cache...")
+        try:
+            return pd.read_pickle(cache_path)
+        except Exception as e:
+            print(f"  [{symbol}] Failed to read processed cache: {e}. Re-processing...")
+
+    # Load raw data (using the raw cache if available)
+    df = get_historical_data(symbol, timeframe_str, n_bars, use_cache=True)
+    if df is None or df.empty:
+        return None
+
+    # Process features
+    print(f"  [{symbol}] Computing features and labels...")
+    try:
+        from strategy import features
+        from utils.triple_barrier import apply_triple_barrier as apply_atr_barrier
+        
+        df = features.add_technical_features(df)
+        if df is None or df.empty:
+            return None
+            
+        # Labelling
+        df['target'] = apply_atr_barrier(
+            df, 
+            atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+            atr_sl_mult=settings.ATR_SL_MULTIPLIER,
+            time_horizon=time_horizon
+        )
+        
+        # Drop recent data that can't be labelled yet
+        df = df.iloc[:-(time_horizon+1)].dropna()
+        
+        # Add symbol encoding
+        df['symbol_id'] = hash(symbol) % 1000
+        
+        # Add symbol volatility class
+        atr_mean = df['atr'].mean() if 'atr' in df.columns else 0
+        close_mean = df['close'].mean()
+        vol_ratio = atr_mean / close_mean if close_mean > 0 else 0
+        
+        if vol_ratio < 0.0005:
+            vol_class = 0
+        elif vol_ratio < 0.001:
+            vol_class = 1
+        elif vol_ratio < 0.005:
+            vol_class = 2
+        else:
+            vol_class = 3
+        df['volatility_class'] = vol_class
+        
+        # Save to cache
+        try:
+            df.to_pickle(cache_path)
+            print(f"  [{symbol}] Saved {len(df):,} PROCESSED bars to cache.")
+        except Exception as e:
+            print(f"  [{symbol}] Warning: Failed to save processed cache: {e}")
+            
+        return df
+        
+    except Exception as e:
+        import traceback
+        print(f"\nError processing {symbol}: {e}")
+        traceback.print_exc()
+        return None
