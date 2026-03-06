@@ -1,26 +1,26 @@
 """
-Train LSTM - Multi-symbol support.
+Train LSTM - Unified Global Model (Memory-Efficient).
 
-Trains separate LSTM models for key instruments:
-- EURUSD (default)
-- XAUUSD (Gold)
-- BTCUSD (Bitcoin)
-- GBPUSD
+Pools data from ALL active symbols into one dataset and trains
+a single global BiLSTM-Attention model. Memory-efficient design:
+  1. Limits bars per symbol to keep total RAM under 8GB
+  2. Creates sequences per-symbol to avoid cross-symbol contamination
+  3. Uses PyTorch DataLoader with pin_memory for GPU streaming
+  4. Zero-copy stride tricks for sequence generation
 
-Each model gets its own weights, scaler, and feature columns file.
-Run: python train_lstm.py                    (trains default EURUSD)
-Run: python train_lstm.py XAUUSD BTCUSD     (trains specific symbols)
-Run: python train_lstm.py --all              (trains all key symbols)
+Run: python train_lstm.py           (trains global model on all symbols)
+Run: python train_lstm.py --epochs 30
 """
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import pandas as pd
 import numpy as np
 import joblib
 import os
 import sys
+import time
+import shutil
 import argparse
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, TensorDataset
@@ -34,106 +34,221 @@ from strategy.lstm_model import BiLSTMWithAttention
 from market_data import loader
 from config import settings
 
-# Key symbols to train models for
-KEY_SYMBOLS = settings.ALL_BASE_SYMBOLS
+# Max bars per symbol to keep memory reasonable
+# 20K bars × 17 symbols × 60 seq_len × 107 features × 4 bytes ≈ 8.7 GB
+MAX_BARS_PER_SYMBOL = 20000
 
 
-def create_sequences(data, target, seq_length):
-    xs, ys = [], []
-    for i in range(len(data) - seq_length):
-        x = data[i : i + seq_length]
-        y = target[i + seq_length]
-        xs.append(x)
-        ys.append(y)
-    return np.array(xs), np.array(ys)
+def create_sequences_fast(data, target, seq_length):
+    """Zero-copy sequence generation using numpy stride tricks."""
+    n = len(data) - seq_length
+    if n <= 0:
+        return np.empty((0, seq_length, data.shape[1]), dtype=np.float32), np.empty((0, 1), dtype=np.float32)
+    
+    from numpy.lib.stride_tricks import sliding_window_view
+    X_seq = sliding_window_view(data, window_shape=(seq_length, data.shape[1]))
+    X_seq = np.ascontiguousarray(X_seq[:n].reshape(n, seq_length, data.shape[1]))
+    y_seq = target[seq_length:seq_length + n]
+    
+    return X_seq, y_seq
 
 
-def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
-    """Trains an LSTM model for a specific symbol."""
-    print(f"\n{'='*50}")
-    print(f"  TRAINING LSTM: {symbol} on {timeframe}")
-    print(f"{'='*50}")
+def train_global_lstm(epochs=50, batch_size=256, lr=0.001, timeframe="M15"):
+    """Trains ONE global LSTM model on data pooled from all active symbols."""
     
-    # 1. Load Data - use M15 to match live strategy
-    df, truncated = loader.get_historical_data(symbol, timeframe, settings.HISTORY_BARS)
-    if df is None or len(df) < 200 or truncated:
-        print(f"Failed to load sufficient data for {symbol}. Skipping.")
-        return False
+    print("\n" + "=" * 60)
+    print("  GLOBAL LSTM TRAINING - Unified Multi-Symbol Model")
+    print("=" * 60)
     
-    print(f"Loaded {len(df)} bars")
-        
-    # 2. Add Features
-    df = features.add_technical_features(df)
-    df = df.dropna()
+    # ── Device Setup ──────────────────────────────────────────────────────
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        print(f"[INFO] GPU: {torch.cuda.get_device_name(0)} (cuDNN Benchmark Enabled)")
+    else:
+        print(f"[INFO] Device: {device}")
     
-    # 3. Prepare Data
-    drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 
-                 'spread', 'real_volume', 'target']
-    feature_cols = [c for c in df.columns if c not in drop_cols]
+    # ── Stage 1: Collect & Process Data Symbol-by-Symbol ──────────────────
+    symbols = settings.ALL_BASE_SYMBOLS
+    print(f"\n[STAGE 1] Collecting data from {len(symbols)} symbols "
+          f"(max {MAX_BARS_PER_SYMBOL:,} bars each)...")
     
-    target_col = 'close'
-    
-    X = df[feature_cols].values
-    y = df[target_col].values.reshape(-1, 1)
-    
-    print(f"Features: {len(feature_cols)} | Samples: {len(X)}")
-    
-    # 4. Scale Data
+    feature_cols = None
     feature_scaler = MinMaxScaler()
     target_scaler = MinMaxScaler()
     
-    X_scaled = feature_scaler.fit_transform(X)
-    y_scaled = target_scaler.fit_transform(y)
+    # First pass: collect raw 2D data for scaler fitting
+    all_raw_X = []
+    all_raw_y = []
+    valid_symbols_data = []  # (symbol, X_2d, y_2d) for second pass
     
-    # 5. Create Sequences
-    seq_length = settings.LSTM_SEQ_LENGTH
-    X_seq, y_seq = create_sequences(X_scaled, y_scaled, seq_length)
+    for i, symbol in enumerate(symbols):
+        tag = f"[{i+1}/{len(symbols)}] {symbol:<12}"
+        try:
+            result = loader.get_historical_data(symbol, timeframe, settings.HISTORY_BARS)
+            if isinstance(result, tuple):
+                df, _ = result
+            else:
+                df = result
+            if df is None or len(df) < 200:
+                print(f"  {tag} ✗ Insufficient data, skipping")
+                continue
+            
+            df = features.add_technical_features(df)
+            df = df.dropna()
+            
+            if len(df) < 200:
+                print(f"  {tag} ✗ Too few rows after features, skipping")
+                continue
+            
+            # Keep only the most recent MAX_BARS_PER_SYMBOL bars
+            if len(df) > MAX_BARS_PER_SYMBOL:
+                df = df.tail(MAX_BARS_PER_SYMBOL).reset_index(drop=True)
+            
+            # Determine feature columns on first symbol
+            drop_cols = ['time', 'open', 'high', 'low', 'close', 'tick_volume',
+                         'spread', 'real_volume', 'target']
+            if feature_cols is None:
+                feature_cols = [c for c in df.columns if c not in drop_cols]
+            
+            X = df[feature_cols].values.astype(np.float32)
+            y = df['close'].values.reshape(-1, 1).astype(np.float32)
+            
+            all_raw_X.append(X)
+            all_raw_y.append(y)
+            valid_symbols_data.append((symbol, X, y))
+            print(f"  {tag} ✓ {len(df):,} bars")
+            
+        except Exception as e:
+            print(f"  {tag} ✗ Error: {e}")
+            continue
     
-    if len(X_seq) < 100:
-        print(f"Not enough sequences ({len(X_seq)}). Need at least 100.")
+    if not all_raw_X:
+        print("[ERROR] No data loaded. Exiting.")
         return False
     
-    # 6. Train/Test Split (time-based)
-    train_size = int(len(X_seq) * 0.8)
-    X_train, X_test = X_seq[:train_size], X_seq[train_size:]
-    y_train, y_test = y_seq[:train_size], y_seq[train_size:]
+    print(f"\n  Symbols loaded: {len(valid_symbols_data)}/{len(symbols)}")
     
-    # 7. Convert to Tensors
+    # ── Stage 2: Fit Global Scalers on 2D data ────────────────────────────
+    print(f"\n[STAGE 2] Global Scaling & Sequence Creation")
+    t0 = time.time()
+    
+    # Stack 2D data for scaler fitting (this is manageable: ~340K × 107 × 4 = ~145 MB)
+    X_2d_all = np.vstack(all_raw_X)
+    y_2d_all = np.vstack(all_raw_y)
+    
+    feature_scaler.fit(X_2d_all)
+    target_scaler.fit(y_2d_all)
+    
+    total_2d_rows = len(X_2d_all)
+    print(f"  Global scaler fit on {total_2d_rows:,} rows × {X_2d_all.shape[1]} features")
+    
+    # Free the 2D stacked arrays immediately
+    del X_2d_all, y_2d_all, all_raw_X, all_raw_y
+    
+    # ── Stage 3: Create Sequences per-symbol (memory-efficient) ───────────
+    seq_length = settings.LSTM_SEQ_LENGTH
+    all_X_seq = []
+    all_y_seq = []
+    total_sequences = 0
+    
+    for symbol, X_raw, y_raw in valid_symbols_data:
+        # Scale this symbol's data
+        X_scaled = feature_scaler.transform(X_raw)
+        y_scaled = target_scaler.transform(y_raw)
+        
+        # Create sequences
+        X_seq, y_seq = create_sequences_fast(X_scaled, y_scaled, seq_length)
+        
+        if len(X_seq) > 0:
+            all_X_seq.append(X_seq)
+            all_y_seq.append(y_seq)
+            total_sequences += len(X_seq)
+            print(f"  [{symbol}] {len(X_seq):,} sequences")
+        
+        # Free intermediate scaled arrays
+        del X_scaled, y_scaled
+    
+    # Free raw data references
+    del valid_symbols_data
+    
+    # ── Stack all sequences ───────────────────────────────────────────────
+    print(f"\n  Stacking {total_sequences:,} sequences...")
+    X_combined = np.vstack(all_X_seq)
+    y_combined = np.vstack(all_y_seq)
+    
+    # Free the per-symbol lists
+    del all_X_seq, all_y_seq
+    
+    elapsed = time.time() - t0
+    print(f"  Total Sequences:  {total_sequences:,}")
+    print(f"  Features:         {X_combined.shape[2]}")
+    print(f"  Sequence Length:   {seq_length} steps")
+    mem_gb = X_combined.nbytes / (1024**3)
+    print(f"  Memory Usage:     {mem_gb:.1f} GB")
+    print(f"  Prep Time:        {elapsed:.1f}s")
+    
+    # ── Stage 4: Train/Val Split ──────────────────────────────────────────
+    print(f"\n[STAGE 3] Train-Val Split")
+    
+    indices = np.random.permutation(len(X_combined))
+    X_combined = X_combined[indices]
+    y_combined = y_combined[indices]
+    del indices
+    
+    train_size = int(len(X_combined) * 0.8)
+    X_train, X_val = X_combined[:train_size], X_combined[train_size:]
+    y_train, y_val = y_combined[:train_size], y_combined[train_size:]
+    del X_combined, y_combined
+    
+    print(f"  Train: {len(X_train):,} sequences")
+    print(f"  Val:   {len(X_val):,} sequences")
+    
+    # Convert to tensors (use as_tensor to avoid copy when possible)
     train_data = TensorDataset(
-        torch.from_numpy(X_train).float(), 
-        torch.from_numpy(y_train).float()
+        torch.as_tensor(X_train, dtype=torch.float32),
+        torch.as_tensor(y_train, dtype=torch.float32)
     )
-    test_data = TensorDataset(
-        torch.from_numpy(X_test).float(), 
-        torch.from_numpy(y_test).float()
+    val_data = TensorDataset(
+        torch.as_tensor(X_val, dtype=torch.float32),
+        torch.as_tensor(y_val, dtype=torch.float32)
     )
     
-    train_loader = DataLoader(train_data, shuffle=True, batch_size=batch_size)
-    test_loader = DataLoader(test_data, batch_size=batch_size)
+    train_loader = DataLoader(train_data, shuffle=True, batch_size=batch_size, 
+                              num_workers=0, pin_memory=(device.type == 'cuda'))
+    val_loader = DataLoader(val_data, batch_size=batch_size,
+                            num_workers=0, pin_memory=(device.type == 'cuda'))
     
-    # 8. Initialize Model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}")
-    if device.type == 'cuda':
-        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    # ── Stage 5: Model Architecture & Training ───────────────────────────
+    n_features = X_train.shape[2]
+    del X_train, X_val, y_train, y_val  # Free numpy, tensors are in DataLoader
+    
+    print(f"\n[STAGE 4] Model Architecture & Training")
     
     model = BiLSTMWithAttention(
-        input_size=X.shape[1],
+        input_size=n_features,
         hidden_size=64,
         num_layers=2,
         device=device
     ).to(device)
     
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"  Model Parameters: {total_params:,}")
+    print(f"  Batch Size:       {batch_size}")
+    print(f"  Training for up to {epochs} epochs (patience 10)...")
+    
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
     
-    # 9. Training Loop with early stopping
     best_loss = float('inf')
     patience = 10
     patience_counter = 0
+    models_dir = os.path.join(os.path.dirname(__file__), "models")
+    os.makedirs(models_dir, exist_ok=True)
     
     for epoch in range(epochs):
+        # ── Training ──
         model.train()
         train_loss = 0
         for X_batch, y_batch in train_loader:
@@ -147,52 +262,75 @@ def train_lstm(symbol, epochs=50, batch_size=32, lr=0.001, timeframe="M15"):
             optimizer.step()
             
             train_loss += loss.item()
-            
-        # Validation
+        
+        # ── Validation ──
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for X_batch, y_batch in test_loader:
+            for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
                 loss = criterion(output, y_batch)
                 val_loss += loss.item()
         
         train_loss /= len(train_loader)
-        val_loss /= len(test_loader)
+        val_loss /= len(val_loader)
         
         scheduler.step(val_loss)
         
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/{epochs} | Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+        # Progress logging
+        lr_current = optimizer.param_groups[0]['lr']
+        print(f"  Epoch {epoch+1:>3}/{epochs} | "
+              f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
+              f"LR: {lr_current:.1e} | "
+              f"{'★ Best' if val_loss < best_loss else ''}")
         
         if val_loss < best_loss:
             best_loss = val_loss
             patience_counter = 0
-            # Save Model
-            models_dir = os.path.join(os.path.dirname(__file__), "models")
-            os.makedirs(models_dir, exist_ok=True)
-            torch.save(model.state_dict(), os.path.join(models_dir, f"lstm_{symbol}.pth"))
-            joblib.dump(feature_scaler, os.path.join(models_dir, f"lstm_{symbol}_scaler.pkl"))
-            joblib.dump(target_scaler, os.path.join(models_dir, f"lstm_{symbol}_target_scaler.pkl"))
-            joblib.dump(feature_cols, os.path.join(models_dir, f"lstm_{symbol}_cols.pkl"))
+            
+            # Save as Global model
+            torch.save(model.state_dict(), os.path.join(models_dir, "lstm_global.pth"))
+            joblib.dump(feature_scaler, os.path.join(models_dir, "lstm_global_scaler.pkl"))
+            joblib.dump(target_scaler, os.path.join(models_dir, "lstm_global_target_scaler.pkl"))
+            joblib.dump(feature_cols, os.path.join(models_dir, "lstm_global_cols.pkl"))
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch+1}")
+                print(f"\n  Early stopping at epoch {epoch+1}")
                 break
     
-    print(f"[OK] {symbol} training complete. Best val loss: {best_loss:.6f}")
+    # ── Stage 6: Save Per-Symbol Copies (Backward Compatible) ────────────
+    print(f"\n[STAGE 5] Saving per-symbol model copies for backward compatibility...")
+    
+    global_model_path = os.path.join(models_dir, "lstm_global.pth")
+    global_scaler_path = os.path.join(models_dir, "lstm_global_scaler.pkl")
+    global_target_scaler_path = os.path.join(models_dir, "lstm_global_target_scaler.pkl")
+    global_cols_path = os.path.join(models_dir, "lstm_global_cols.pkl")
+    
+    for sym in symbols:
+        shutil.copy2(global_model_path, os.path.join(models_dir, f"lstm_{sym}.pth"))
+        shutil.copy2(global_scaler_path, os.path.join(models_dir, f"lstm_{sym}_scaler.pkl"))
+        shutil.copy2(global_target_scaler_path, os.path.join(models_dir, f"lstm_{sym}_target_scaler.pkl"))
+        shutil.copy2(global_cols_path, os.path.join(models_dir, f"lstm_{sym}_cols.pkl"))
+    
+    print(f"  Saved model copies for {len(symbols)} symbols")
+    
+    print(f"\n{'=' * 60}")
+    print(f"  GLOBAL LSTM TRAINING COMPLETE")
+    print(f"  Best Val Loss: {best_loss:.6f}")
+    print(f"  Symbols:       {len(symbols)}")
+    print(f"  Sequences:     {total_sequences:,}")
+    print(f"{'=' * 60}")
+    
     return True
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train LSTM models")
-    parser.add_argument('symbols', nargs='*', default=[settings.SYMBOL],
-                        help='Symbols to train (e.g., EURUSD XAUUSD BTCUSD)')
-    parser.add_argument('--all', action='store_true', 
-                        help='Train all key symbols')
+    parser = argparse.ArgumentParser(description="Train Global LSTM model")
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--batch-size', type=int, default=256)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--timeframe', type=str, default='M15')
     args = parser.parse_args()
     
@@ -200,13 +338,9 @@ if __name__ == "__main__":
         print("Failed to connect to MT5.")
         sys.exit(1)
     
-    symbols_to_train = KEY_SYMBOLS if args.all else args.symbols
-    
-    print(f"Training LSTM for: {', '.join(symbols_to_train)}")
-    
-    for sym in symbols_to_train:
-        train_lstm(sym, epochs=args.epochs, timeframe=args.timeframe)
-    
-    print(f"\n{'='*50}")
-    print("  ALL TRAINING COMPLETE")
-    print(f"{'='*50}")
+    train_global_lstm(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        timeframe=args.timeframe
+    )
