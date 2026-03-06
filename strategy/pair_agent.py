@@ -120,7 +120,7 @@ class PairAgent:
             # Ideally PairAgent is autonomous.
             
             # Fetch Primary Data
-            df, primary_truncated = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000) # Increased for Scalping Indicators (M1)
+            df, primary_truncated = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000)
             
             if df is None or len(df) < 100:
                 return None, "Insufficient Data"

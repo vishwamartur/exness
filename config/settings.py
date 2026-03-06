@@ -62,7 +62,7 @@ SYMBOLS_COMMODITIES = []
 # Symbol Blacklist (high commission, low liquidity)
 BLACKLISTED_SYMBOLS = os.getenv("BLACKLISTED_SYMBOLS", "XPDUSD").split(",")
 
-TIMEFRAME = "M15"  # Shifted to M15 to filter noise and capture structural trends
+TIMEFRAME = "H1"  # Shifted to H1 for structural Risk:Reward trading (Scalping disabled)
 print(f"[SETTINGS] TIMEFRAME set to: {TIMEFRAME}")
 LOT_SIZE = float(os.getenv("LOT_SIZE", 0.01))  # EXTREME SAFETY: 0.01 Micro-lots for $63 account
 DEVIATION = int(os.getenv("DEVIATION", 20))
@@ -73,8 +73,8 @@ RISK_PERCENT = float(os.getenv("RISK_PERCENT", 2.0))       # Risk 2% of account 
 MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 5.0))  # Max risk for A+ setups (confluence >= 5)
 
 # ATR-Based Dynamic SL/TP (replaces fixed pips)
-ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 2.0))  # Widened to 2.0x ATR to survive noise/stop-hunts
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 4.0))  # Aim for larger trend capture (4.0x ATR)
+ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.0))  # 1.0x ATR for strict Risk limit
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))  # 3.0x ATR for strict 1:3 Reward target
 
 # Confluence Gating
 MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 4))  # STRICT: Require 4 module agreements
@@ -95,11 +95,11 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit mu
 #─── Trade Management────────────────────────────────────────────────────
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 1800))  # 30 minutes between trades (HFT disabled for retail)
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 2))     # STRICT: 2 max per symbol (Quality over Quantity)
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 1))     # STRICT: 1 max per symbol (Quality over Quantity)
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 5.0)) # Hard stop if daily loss > $5
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 3))  # Strict: 3 max for micro-account safety
-LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 15)) # Prevents stale limit gaps
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))  # Hard cap concurrent scalp trades
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 2))  # Strict: 2 max for micro-account safety
+LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 60)) # Prevents stale limit gaps
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 2))  # Hard cap concurrent trades
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
 MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
 MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 150.0))  # Commodities (~$0.50 spread on Gold)
@@ -112,7 +112,7 @@ VOLATILITY_ATR_MIN_COMMODITY = float(os.getenv("VOLATILITY_ATR_MIN_COMMODITY", 0
 
 # ─── Strict Scalp Session Windows (UTC) ──────────────────────────────────
 # ONLY trade during London Open and NY Open for tight spreads + volume
-SCALP_SESSION_FILTER = os.getenv("SCALP_SESSION_FILTER", "False").lower() == "true"
+SCALP_SESSION_FILTER = False # Disabled - Taking valid structural R:R setups at any time
 SCALP_SESSIONS = [
     {"name": "London Open", "start": 7, "end": 10},   # 07:00-10:00 UTC
     {"name": "NY Open",     "start": 13, "end": 16},  # 13:00-16:00 UTC
@@ -140,8 +140,8 @@ MANDATE_MIN_RR = True  # Enforce, but only for symbols NOT in RISK_OVERRIDE_SYMB
 AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0))
 
 # Trailing Stop (ATR Based)
-TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 2.0)) # Activate when profit > 2.0 ATR
-TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 0.5))         # Trail behind by 0.5 ATR
+TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 4.0)) # Effectively disabled (Requires 4 R to trail)
+TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 1.0))         # Trail behind by 1.0 ATR
 # Legacy Fixed % (keeping for backwards compatibility if needed, but primary is ATR)
 TRAILING_STOP_ACTIVATE_PERCENT = float(os.getenv("TRAILING_ACTIVATE", 0.005))
 TRAILING_STOP_STEP_PERCENT = float(os.getenv("TRAILING_STEP", 0.001))

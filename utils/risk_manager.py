@@ -149,21 +149,21 @@ class RiskManager:
         if is_blocked:
             return False, f"News Blackout: {event_name}"
 
-        # 5. Scalp Session Filter (London Open & NY Open ONLY)
+        # 5. Session Filter (London Open & NY Open typically)
         #    Crypto trades 24/7 — exempt from session gate
-        if getattr(settings, 'SCALP_SESSION_FILTER', False):
+        if getattr(settings, 'SESSION_FILTER', False):
             crypto_bases = ('BTC', 'ETH', 'LTC', 'XRP', 'BCH', 'BNB', 'SOL', 'ADA', 'DOT')
             is_crypto = any(symbol.upper().startswith(b) for b in crypto_bases)
             if not is_crypto:
                 current_hour = datetime.now(timezone.utc).hour
                 in_session = any(
                     s['start'] <= current_hour < s['end']
-                    for s in getattr(settings, 'SCALP_SESSIONS', [])
+                    for s in getattr(settings, 'TRADE_SESSIONS', {}).values()
                 )
                 if not in_session:
                     session_str = ', '.join(
-                        f"{s['name']} ({s['start']}:00-{s['end']}:00 UTC)"
-                        for s in getattr(settings, 'SCALP_SESSIONS', [])
+                        f"{name} ({s['start']}:00-{s['end']}:00 UTC)"
+                        for name, s in getattr(settings, 'TRADE_SESSIONS', {}).items()
                     )
                     return False, f"Off-Session (UTC {current_hour}:00 | Active: {session_str})"
 
@@ -246,7 +246,7 @@ class RiskManager:
         Final checks run just BEFORE placing an order.
         Checks: Max concurrent trades, Correlation, Profitability.
         """
-        # 5a. Hard cap on concurrent scalp trades
+        # 5a. Hard cap on concurrent trades
         max_trades = getattr(settings, 'MAX_CONCURRENT_TRADES', 3)
         if len(active_positions) >= max_trades:
             return False, f"Max Concurrent Trades ({max_trades}) reached"

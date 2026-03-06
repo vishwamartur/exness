@@ -352,7 +352,7 @@ class TabTransformerPredictor:
     def load(self, model_path):
         """Load model and scaler from disk."""
         # Load model weights
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device, weights_only=True))
         
         # Load scaler and metadata
         scaler_path = model_path.replace('.pt', '_scaler.pkl')
@@ -383,7 +383,7 @@ def load_tabtransformer_predictor(model_path, device='cpu'):
     """
     # Load model weights to determine dimensions
     try:
-        state_dict = torch.load(model_path, map_location=device)
+        state_dict = torch.load(model_path, map_location=device, weights_only=True)
     except Exception as e:
         print(f"[ERROR] Failed to load model weights: {e}")
         raise
