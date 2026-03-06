@@ -24,6 +24,9 @@ import shutil
 import argparse
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, TensorDataset
+from datetime import datetime
+from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -247,11 +250,20 @@ def train_global_lstm(epochs=50, batch_size=256, lr=0.001, timeframe="M15"):
     models_dir = os.path.join(os.path.dirname(__file__), "models")
     os.makedirs(models_dir, exist_ok=True)
     
-    for epoch in range(epochs):
+    # TensorBoard setup
+    run_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+    tb_dir = os.path.join(os.path.dirname(__file__), "tensorboard_logs", "lstm_global", run_name)
+    writer = SummaryWriter(log_dir=tb_dir)
+    print(f"  TensorBoard Logs: {tb_dir}")
+    print()
+    
+    epoch_pbar = tqdm(range(epochs), desc="Global Training Progress", unit="epoch")
+    for epoch in epoch_pbar:
         # ── Training ──
         model.train()
         train_loss = 0
-        for X_batch, y_batch in train_loader:
+        train_batches = tqdm(train_loader, desc=f"  Epoch {epoch+1} (Train)", leave=False, unit="batch")
+        for X_batch, y_batch in train_batches:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             
             optimizer.zero_grad()
@@ -262,16 +274,19 @@ def train_global_lstm(epochs=50, batch_size=256, lr=0.001, timeframe="M15"):
             optimizer.step()
             
             train_loss += loss.item()
+            train_batches.set_postfix({'loss': f"{loss.item():.6f}"})
         
         # ── Validation ──
         model.eval()
         val_loss = 0
+        val_batches = tqdm(val_loader, desc=f"  Epoch {epoch+1} (Val)", leave=False, unit="batch")
         with torch.no_grad():
-            for X_batch, y_batch in val_loader:
+            for X_batch, y_batch in val_batches:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
                 loss = criterion(output, y_batch)
                 val_loss += loss.item()
+                val_batches.set_postfix({'loss': f"{loss.item():.6f}"})
         
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
@@ -280,10 +295,19 @@ def train_global_lstm(epochs=50, batch_size=256, lr=0.001, timeframe="M15"):
         
         # Progress logging
         lr_current = optimizer.param_groups[0]['lr']
-        print(f"  Epoch {epoch+1:>3}/{epochs} | "
-              f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
-              f"LR: {lr_current:.1e} | "
-              f"{'★ Best' if val_loss < best_loss else ''}")
+        is_best = val_loss < best_loss
+        best_marker = "★ Best" if is_best else ""
+        
+        tqdm.write(f"  Epoch {epoch+1:>3}/{epochs} | "
+                   f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
+                   f"LR: {lr_current:.1e} | "
+                   f"{best_marker}")
+        epoch_pbar.set_postfix({'Train': f"{train_loss:.6f}", 'Val': f"{val_loss:.6f}", 'LR': f"{lr_current:.1e}", 'Best': is_best})
+        
+        # Tensorboard Logging
+        writer.add_scalar('Loss/Train', train_loss, epoch)
+        writer.add_scalar('Loss/Validation', val_loss, epoch)
+        writer.add_scalar('Learning_Rate', lr_current, epoch)
         
         if val_loss < best_loss:
             best_loss = val_loss
@@ -297,8 +321,10 @@ def train_global_lstm(epochs=50, batch_size=256, lr=0.001, timeframe="M15"):
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print(f"\n  Early stopping at epoch {epoch+1}")
+                tqdm.write(f"\n  Early stopping at epoch {epoch+1}")
                 break
+    
+    writer.close()
     
     # ── Stage 6: Save Per-Symbol Copies (Backward Compatible) ────────────
     print(f"\n[STAGE 5] Saving per-symbol model copies for backward compatibility...")
