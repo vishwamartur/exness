@@ -111,19 +111,36 @@ class PairAgent:
         # 4. Success
         return candidate, f"CANDIDATE ({candidate['direction']})"
 
+    @staticmethod
+    def _spread_to_pips(symbol: str, ask: float, bid: float) -> float:
+        """
+        Convert raw ask-bid spread to pips, mirroring RiskManager's logic:
+            spread_points = (ask - bid) / point
+            spread_pips   = spread_points / 10.0   (1 pip == 10 points)
+        Falls back to dividing by 0.00001 (5-decimal forex) when symbol_info
+        is unavailable, then divides by 10 the same way.
+        """
+        sym_info = mt5.symbol_info(symbol)
+        point = sym_info.point if sym_info and sym_info.point > 0 else 0.00001
+        spread_points = (ask - bid) / point
+        return spread_points / 10.0
+
     def _check_spread(self) -> Tuple[bool, str]:
         """
         Check if current spread is acceptable for this symbol.
-        Returns (ok, reason).
+        Uses the same points→pips conversion as RiskManager to prevent
+        overly strict blocking caused by comparing raw points to pip thresholds.
+        Returns (ok, reason_string).
         """
         try:
             tick = mt5.symbol_info_tick(self.symbol)
             if not tick:
-                return True, ""  # Can't check, allow trade
+                return True, ""  # Can't check — fail open
 
-            spread = tick.ask - tick.bid
-            if spread <= 0:
+            if (tick.ask - tick.bid) <= 0:
                 return True, ""
+
+            spread_pips = self._spread_to_pips(self.symbol, tick.ask, tick.bid)
 
             if self.symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
                 max_spread = getattr(settings, 'MAX_SPREAD_PIPS_CRYPTO', 20000.0)
@@ -131,13 +148,6 @@ class PairAgent:
                 max_spread = getattr(settings, 'MAX_SPREAD_PIPS_COMMODITY', 150.0)
             else:
                 max_spread = getattr(settings, 'MAX_SPREAD_PIPS', 3.0)
-
-            # Convert max_spread from pips to price
-            sym_info = mt5.symbol_info(self.symbol)
-            if sym_info:
-                spread_pips = spread / sym_info.point
-            else:
-                spread_pips = spread / 0.0001  # fallback for forex
 
             if spread_pips > max_spread:
                 return False, f"Spread too wide ({spread_pips:.1f} > {max_spread:.1f} pips)"
@@ -641,11 +651,11 @@ class PairAgent:
         1. Spread / SL Ratio check
         2. Hunting Hours check
         """
-        # 1. Spread Check
+        # 1. Spread Check (uses shared _spread_to_pips for consistent pip conversion)
         tick = mt5.symbol_info_tick(self.symbol)
         if tick:
-            spread_pips = (tick.ask - tick.bid)
-            # Assuming SL distance is in price units
+            spread_pips = self._spread_to_pips(self.symbol, tick.ask, tick.bid)
+            # SL distance is in price units; ratio must be in the same unit space
             sl_dist = candidate['sl_distance']
             
             if sl_dist > 0:
