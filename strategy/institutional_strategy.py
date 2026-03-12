@@ -28,6 +28,7 @@ from utils.data_cache import DataCache
 from utils.trade_journal import TradeJournal
 from utils.risk_manager import RiskManager
 from utils.news_filter import is_news_blackout, get_active_events
+from utils.correlation_filter import check_correlation_conflict
 from utils.adaptive_position_manager import AdaptivePositionManager
 from utils.pre_trade_analyzer import PreTradeAnalyzer
 from analysis.market_analyst import MarketAnalyst
@@ -377,7 +378,19 @@ class InstitutionalStrategy:
             print(f"[RISK] Execution Blocked: direction '{direction}' is not BUY/SELL")
             return
 
-        # Guard 2: Verify symbol is tradeable (not disabled/reference instrument)
+        # Guard 2: Correlation filter — prevent correlated position conflicts
+        try:
+            open_positions = self.client.get_all_positions()
+            has_conflict, conflict_reason = check_correlation_conflict(
+                symbol, direction, open_positions
+            )
+            if has_conflict:
+                print(f"[RISK] Execution Blocked: {conflict_reason}")
+                return
+        except Exception as e:
+            print(f"[RISK] Correlation check error (non-blocking): {e}")
+
+        # Guard 3: Verify symbol is tradeable (not disabled/reference instrument)
         _sym_info = mt5.symbol_info(symbol)
         if _sym_info is None or _sym_info.trade_mode == 0:
             print(f"[RISK] Execution Blocked: {symbol} trade_mode=DISABLED (not a tradeable instrument)")
