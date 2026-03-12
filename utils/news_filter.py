@@ -14,6 +14,7 @@ Key events to avoid (±30 minutes around release):
 """
 
 import threading
+import requests
 from datetime import datetime, timezone, timedelta
 
 
@@ -144,7 +145,6 @@ def _fetch_calendar():
             return _CALENDAR_CACHE["data"]
 
         try:
-            import requests
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             raw = resp.json()
