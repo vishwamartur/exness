@@ -236,10 +236,28 @@ class PairAgent:
         # 5. Construct Candidate using ML or BOS
         # Filter: Minimum Score
         score = q_res.get('score', 0)
-        
-        # Basic Filter (regime-adaptive)
+
+        # --- Regime-adaptive parameters (must happen BEFORE score filter) ---
+        # Determine regime and pick dynamic thresholds from REGIME_PARAMS
+        _regime_params = getattr(settings, 'REGIME_PARAMS', {})
+        # Map the session-level regime string to the REGIME_PARAMS keys
+        _regime_key = "RANGING"  # safe default
+        if self.regime in ("TRENDING", "BULL_TREND", "BEAR_TREND"):
+            _regime_key = "TRENDING"
+        elif self.regime in ("VOLATILE", "VOLATILE_HIGH"):
+            _regime_key = "VOLATILE"
+        elif self.regime in ("RANGING", "NEUTRAL", "UNKNOWN"):
+            _regime_key = "RANGING"
+
+        _rp = _regime_params.get(_regime_key, {})
+        min_confluence = int(_rp.get('MIN_CONFLUENCE_SCORE', settings.MIN_CONFLUENCE_SCORE))
+        # Store resolved regime key for downstream use
+        self._regime_key = _regime_key
+        self._regime_rp = _rp
+
+        # Basic Filter (now uses regime-adaptive min_confluence)
         if score < min_confluence:
-            return None, f"Low Score ({score} < {min_confluence})"
+            return None, f"Low Score ({score} < {min_confluence} for {_regime_key} regime)"
             
         # Sureshot Mode Filter (Only boost, don't block if > MIN)
         # if score < settings.SURESHOT_MIN_SCORE:
@@ -285,12 +303,10 @@ class PairAgent:
             # Override settings for this scan cycle (local vars used below)
             atr_tp_mult = rp.get('ATR_TP_MULTIPLIER', settings.ATR_TP_MULTIPLIER)
             atr_sl_mult = rp.get('ATR_SL_MULTIPLIER', settings.ATR_SL_MULTIPLIER)
-            min_confluence = rp.get('MIN_CONFLUENCE_SCORE', settings.MIN_CONFLUENCE_SCORE)
             max_daily = rp.get('MAX_DAILY_TRADES', settings.MAX_DAILY_TRADES)
         else:
             atr_tp_mult = settings.ATR_TP_MULTIPLIER
             atr_sl_mult = settings.ATR_SL_MULTIPLIER
-            min_confluence = settings.MIN_CONFLUENCE_SCORE
             max_daily = settings.MAX_DAILY_TRADES
 
         # Skip trades in bad regimes (RANGING, VOLATILE_HIGH)
