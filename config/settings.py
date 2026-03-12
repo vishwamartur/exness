@@ -157,7 +157,8 @@ H4_TREND_FILTER = os.getenv("H4_TREND_FILTER", "True").lower() == "true"   # Pre
 
 # ─── News Integration ────────────────────────────────────────────────────
 NEWS_CALENDAR_URL = os.getenv("NEWS_CALENDAR_URL", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")
-NEWS_CALENDAR_CACHE_MINUTES = int(os.getenv("NEWS_CALENDAR_CACHE_MINUTES", 60))  # Refresh every 60 min
+NEWS_CACHE_HOURS = int(os.getenv("NEWS_CACHE_HOURS", 4))  # Cache calendar for 4 hours
+NEWS_CALENDAR_CACHE_MINUTES = NEWS_CACHE_HOURS * 60  # Backward-compatible alias
 NEWS_PRE_MINUTES = int(os.getenv("NEWS_PRE_MINUTES", 15))   # Block 15 min before high-impact news
 NEWS_POST_MINUTES = int(os.getenv("NEWS_POST_MINUTES", 15)) # Block 15 min after high-impact news
 
@@ -188,6 +189,37 @@ BOS_MAX_SPREAD_RATIO = 0.15      # Spread max 15% of SL capability
 BOS_HUNTING_HOURS = [8, 9, 10, 13, 14, 15] # Strict London/NY Open hours
 BOS_MIN_RISK_REWARD = 2.5       # Asymmetric Payoff for Retail
 NEWS_FILTER_ENABLE = True       # Enable High-Impact News Avoidance
+BOS_REQUIRE_CONFIRMATION = True  # Require confirmation candle after BOS break
+BOS_MIN_PULLBACK_PCT = 0.3      # Min pullback as fraction of break candle range
+
+# ─── HMM Regime Detection ───────────────────────────────────────────────
+USE_HMM_REGIME = True            # Use HMM-based regime detection for adaptive params
+
+# ─── Regime-Adaptive Parameters ─────────────────────────────────────────
+REGIME_PARAMS = {
+    "TRENDING": {
+        "ATR_TP_MULTIPLIER": 5.0,
+        "ATR_SL_MULTIPLIER": 1.8,
+        "MIN_CONFLUENCE_SCORE": 3,
+        "MAX_DAILY_TRADES": 4,
+    },
+    "RANGING": {
+        "ATR_TP_MULTIPLIER": 2.5,
+        "ATR_SL_MULTIPLIER": 1.5,
+        "MIN_CONFLUENCE_SCORE": 5,
+        "MAX_DAILY_TRADES": 2,
+    },
+    "VOLATILE": {
+        "ATR_TP_MULTIPLIER": 3.0,
+        "ATR_SL_MULTIPLIER": 2.5,
+        "MIN_CONFLUENCE_SCORE": 5,
+        "MAX_DAILY_TRADES": 1,
+    },
+}
+
+# ─── Trailing Stop (New ATR-Based) ──────────────────────────────────────
+USE_TRAILING_STOP = True         # Enable ATR-based trailing stops on open positions
+TRAILING_ATR_MULTIPLIER = 1.5    # Trail SL by ATR * this multiplier behind price
 
 # ─── Institutional Flow Tracking (Smart Money) ───────────────────────────
 INST_FLOW_ENABLE = os.getenv("INST_FLOW_ENABLE", "True").lower() == "true"

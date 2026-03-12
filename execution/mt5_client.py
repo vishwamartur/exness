@@ -362,6 +362,86 @@ class MT5Client:
             print(f"Partial close {ticket}: {close_volume} lots closed ({fraction*100:.0f}%)")
             return result
 
+    def update_trailing_stop(self, ticket, atr_value, multiplier=None):
+        """
+        ATR-based trailing stop. Moves SL to trail behind price by
+        atr_value * multiplier. Only tightens SL, never loosens.
+
+        Args:
+            ticket: Position ticket
+            atr_value: Current ATR value in price units
+            multiplier: ATR multiplier (defaults to settings.TRAILING_ATR_MULTIPLIER)
+
+        Returns:
+            True if SL was modified, False otherwise
+        """
+        if multiplier is None:
+            multiplier = getattr(settings, 'TRAILING_ATR_MULTIPLIER', 1.5)
+
+        position = mt5.positions_get(ticket=ticket)
+        if position is None or len(position) == 0:
+            return False
+
+        pos = position[0]
+        trail_distance = atr_value * multiplier
+
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if not tick:
+            return False
+
+        if pos.type == mt5.ORDER_TYPE_BUY:
+            # BUY: trail SL below current bid
+            new_sl = tick.bid - trail_distance
+            # Only move SL up, never down
+            if new_sl <= pos.sl and pos.sl > 0:
+                return False
+            # Don't set SL above current price
+            if new_sl >= tick.bid:
+                return False
+        else:
+            # SELL: trail SL above current ask
+            new_sl = tick.ask + trail_distance
+            # Only move SL down, never up
+            if new_sl >= pos.sl and pos.sl > 0:
+                return False
+            # Don't set SL below current price
+            if new_sl <= tick.ask:
+                return False
+
+        return self._modify_sl(ticket, new_sl, pos.tp)
+
+    def _modify_sl(self, ticket, new_sl, tp=None):
+        """
+        Low-level SL modification. Preserves existing TP if not provided.
+
+        Returns:
+            True if modification succeeded, False otherwise
+        """
+        position = mt5.positions_get(ticket=ticket)
+        if position is None or len(position) == 0:
+            return False
+
+        pos = position[0]
+        if tp is None:
+            tp = pos.tp
+
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": pos.symbol,
+            "sl": round(new_sl, 5),
+            "tp": round(tp, 5),
+            "magic": 234000,
+        }
+
+        try:
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                return True
+        except Exception:
+            pass
+        return False
+
     def close_position(self, ticket, symbol=None):
         """Fully closes a position by ticket."""
         position = mt5.positions_get(ticket=ticket)
