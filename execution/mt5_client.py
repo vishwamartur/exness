@@ -1,3 +1,4 @@
+import math
 import MetaTrader5 as mt5
 import time
 import sys
@@ -425,12 +426,24 @@ class MT5Client:
         if tp is None:
             tp = pos.tp
 
+        # Derive instrument precision from symbol_info so rounding is correct
+        # for all asset classes (e.g. USDJPY=3 digits, BTCUSD=2, XAUUSD=2).
+        # Falls back to 5 (standard 5-decimal forex) when info is unavailable.
+        sym_info = mt5.symbol_info(pos.symbol)
+        if sym_info is not None:
+            digits = sym_info.digits if sym_info.digits > 0 else (
+                # derive from point as a last resort: e.g. point=0.01 → digits=2
+                max(0, -int(round(math.log10(sym_info.point)))) if sym_info.point > 0 else 5
+            )
+        else:
+            digits = 5  # safe fallback for standard 5-decimal forex
+
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "symbol": pos.symbol,
-            "sl": round(new_sl, 5),
-            "tp": round(tp, 5),
+            "sl": round(new_sl, digits),
+            "tp": round(tp, digits),
             "magic": 234000,
         }
 
