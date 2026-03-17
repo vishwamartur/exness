@@ -10,6 +10,7 @@ from market_data import loader
 from utils.trade_journal import TradeJournal
 from utils.trade_journal import TradeJournal
 from strategy.bos_strategy import BOSStrategy
+from strategy.mean_reversion import MeanReversionStrategy
 from utils.news_filter import is_news_blackout
 from analysis.sentiment_analyzer import get_sentiment_analyzer
 from analysis.pattern_memory import get_pattern_memory
@@ -49,10 +50,13 @@ class PairAgent:
         self.last_pattern_id = None  # Track last stored pattern for outcome update
         
         # Performance Thresholds (Self-Correction)
-        self.max_consecutive_losses = 3
+        self.max_consecutive_losses = int(getattr(settings, 'CONSECUTIVE_LOSS_LIMIT', 2))
 
         # BOS Strategy
         self.bos = BOSStrategy()
+        
+        # Mean Reversion Strategy
+        self.mean_reversion = MeanReversionStrategy()
 
         # Load capabilities
         self.timeframe = settings.TIMEFRAME
@@ -132,17 +136,17 @@ class PairAgent:
             
             # Fetch Multi-Timeframe Data if enabled
             if getattr(settings, 'M5_TREND_FILTER', False):
-                 m5, m5_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 100)
+                 m5, m5_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "M5", 250)
                  if m5 is not None and not m5_truncated:
                     data_dict['M5'] = m5
             
             if settings.H1_TREND_FILTER:
-                 h1, h1_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 100)
+                 h1, h1_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H1", 250)
                  if h1 is not None and not h1_truncated:
                     data_dict['H1'] = h1
             
             if settings.H4_TREND_FILTER:
-                 h4, h4_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 60)
+                 h4, h4_truncated = await run_in_executor(loader.get_historical_data, self.symbol, "H4", 250)
                  if h4 is not None and not h4_truncated:
                     data_dict['H4'] = h4
                  
@@ -182,6 +186,11 @@ class PairAgent:
         bos_res = {}
         if getattr(settings, 'BOS_ENABLE', False):
              bos_res = self.bos.analyze(df_scan)
+             
+        # 3.5 Mean Reversion Analysis
+        mr_res = {}
+        if getattr(settings, 'MEAN_REVER_ENABLE', True):
+             mr_res = self.mean_reversion.analyze(df_scan)
         
         # 4. Pattern Recognition Analysis
         from analysis.pattern_recognizer import get_pattern_recognizer
@@ -243,16 +252,11 @@ class PairAgent:
         # Construct
         atr = q_res['features'].get('atr', 0)
 
-        # 2. Volatility-Adaptive Entry: skip dead markets
-        if atr > 0:
-            if self.symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
-                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN_CRYPTO', 50.0)
-            elif self.symbol in getattr(settings, 'SYMBOLS_COMMODITIES', []):
-                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN_COMMODITY', 0.5)
-            else:
-                atr_min = getattr(settings, 'VOLATILITY_ATR_MIN', 0.00015)
-            if atr < atr_min:
-                return None, f"Low Volatility (ATR {atr:.6f} < {atr_min})"
+        # Volatility Compression Filter (Boring Filter)
+        if atr > 0 and 'atr' in df_scan.columns and len(df_scan) >= 100:
+            atr_100_avg = df_scan['atr'].rolling(window=100).mean().iloc[-1]
+            if atr < 0.20 * atr_100_avg:
+                return None, f"Market Too Dead (ATR < 20% of 100-period avg)"
 
         # 3. Spread-Adjusted TP/SL
         tick = mt5.symbol_info_tick(self.symbol)
@@ -299,10 +303,12 @@ class PairAgent:
         )
         
         if not should_trade_pattern:
-            return None, f"Pattern Conflict - {pattern_analysis.get('count', 0)} patterns detected against trade"
+            # Penalty instead of hard block
+            score = max(0, score - 2)
+            print(f"[{self.symbol}] Pattern Penalty (-2): {pattern_analysis.get('count', 0)} patterns detected against trade. New Score: {score}")
         
         # Boost score if patterns support the trade
-        if pattern_confidence > 0.6:
+        if pattern_confidence > 0.6 and should_trade_pattern:
             score = min(6, score + 1)  # Boost score by 1 (max 6)
             print(f"[{self.symbol}] Pattern boost: +1 score (confidence: {pattern_confidence:.2f})")
         
@@ -433,6 +439,29 @@ class PairAgent:
                      return None, "Retail Costs High"
                      
                  return bos_candidate, f"BOS CANDIDATE ({bos_candidate['direction']})"
+
+        # Mean Reversion Override / Fusion
+        if mr_res.get('valid'):
+             mr_candidate = {
+                'symbol': self.symbol,
+                'direction': mr_res['signal'],
+                'score': mr_res['score'], # 10 from MR strategy
+                'entry_price': mr_res['price'],
+                'entry_type': 'MARKET',
+                'ensemble_score': 0,
+                'ml_prob': 0.7, # High technical prob
+                'regime': regime,
+                'regime_type': regime_type,
+                'sl_distance': abs(mr_res['price'] - mr_res['sl']),
+                'tp_distance': abs(mr_res['price'] - mr_res['sl']) * getattr(settings, 'MR_RISK_REWARD', 1.5),
+                'scaling_factor': 1.0,
+                'features': {},
+                'details': {'MeanReversion': mr_res['reason']},
+                'attributes': data_dict
+             }
+             if not self._check_retail_viability(mr_candidate):
+                 return None, "Retail Costs High for MR"
+             return mr_candidate, f"MR CANDIDATE ({mr_candidate['direction']})"
 
         return candidate, "OK"
 

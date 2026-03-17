@@ -28,12 +28,9 @@ from utils.data_cache import DataCache
 from utils.trade_journal import TradeJournal
 from utils.risk_manager import RiskManager
 from utils.news_filter import is_news_blackout, get_active_events
-from utils.adaptive_position_manager import AdaptivePositionManager
 from utils.pre_trade_analyzer import PreTradeAnalyzer
 from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
-from analysis.researcher_agent import ResearcherAgent
-from analysis.critic_agent import CriticAgent
 from utils.telegram_notifier import get_notifier as _tg
 
 def _get_asset_class(symbol):
@@ -62,9 +59,6 @@ class InstitutionalStrategy:
         self.risk_manager = RiskManager(mt5_client)
         self.analyst = MarketAnalyst()
         self.quant = QuantAgent()
-        self.researcher = ResearcherAgent()
-        self.critic = CriticAgent(on_event=on_event)
-        self.adaptive_manager = AdaptivePositionManager(mt5_client, self.quant)
         self.pre_trade_analyzer = PreTradeAnalyzer(self.quant, self.analyst)
         
         # --- STATE -------------------------------------------------------
@@ -105,12 +99,7 @@ class InstitutionalStrategy:
         # Agents handle their own exits, Adaptive Manager provides ML-based optimization
         manage_tasks = [agent.manage_active_trades() for agent in self.agents.values()]
         
-        # Add adaptive position management
-        adaptive_actions = self.adaptive_manager.manage_positions()
-        if adaptive_actions:
-            success_count = self.adaptive_manager.execute_actions(adaptive_actions)
-            if success_count > 0:
-                print(f"[ADAPTIVE] Executed {success_count} position management actions")
+        # Adaptive position management is disabled for strict risk controls
                 
         await asyncio.gather(*manage_tasks, return_exceptions=True)
 
@@ -276,76 +265,18 @@ class InstitutionalStrategy:
             # Telegram: alert on signals
             _tg().scan_candidates(candidates)
             
-            # --- AGENT DEBATE (Researcher) -------------------------------
-            print(f"\n[RESEARCHER] Reviewing best candidate: {best['symbol']}...")
-            if self.on_event:
-                self.on_event({
-                    "type": "RESEARCH_START",
-                    "symbol": best['symbol'],
-                    "data": best,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+            # --- DIRECT EXECUTION (LLM Debate Removed) --------------------
+            attributes = best.pop('attributes', None) # Detach raw data for context
             
-            attributes = best.pop('attributes') # Detach raw data for context
-            analyst_mock = {'regime': best['regime']}
-            
+            print(f"  >>> EXECUTE: {best['symbol']} {best['direction']}")
             try:
-                # Async Call to Researcher
-                # Pass 'best' (candidate dict) as quant_data, which has 'features', 'score', etc.
-                research = await self.researcher.conduct_research(best['symbol'], best, analyst_mock)
-                
-                print(f"--> Debate Result: {research['action']} (Conf: {research['confidence']}%)")
-                print(f"--> Reason: {research['reason']}")
-
-                if self.on_event:
-                    self.on_event({
-                        "type": "RESEARCH_RESULT",
-                        "symbol": best['symbol'],
-                        "action": research['action'],
-                        "confidence": research['confidence'],
-                        "reason": research['reason'],
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                
-                # Decision Logic
-                # 1. Strong Researcher Agreement (Relaxed to 50%)
-                execute = False
-                if research['action'] == best['direction'] and research['confidence'] >= 50:
-                    execute = True
-                # 2. Technical Override (Sureshot from Settings)
-                elif best['score'] >= settings.SURESHOT_MIN_SCORE: 
-                     execute = True
-                     print(f"--> Executing on Turnkey Score (>{settings.SURESHOT_MIN_SCORE}).")
-                # 3. Aggressive Mode: Allow HOLD if score meets min confluence
-                elif best['score'] >= settings.MIN_CONFLUENCE_SCORE and research['action'] == 'HOLD':
-                     execute = True
-                     print("--> Executing on Min Score (Aggressive Mode).")
-                
-                if execute:
-                    print(f"  >>> EXECUTE: {best['symbol']} {best['direction']}")
-                    # Inject researcher data for logging
-                    best['researcher_action'] = research['action']
-                    best['researcher_confidence'] = research['confidence']
-                    best['researcher_reason'] = research['reason']
-                    try:
-                        self._execute_trade(best)
-                    except Exception as e:
-                        print(f"[ERROR] Trade execution failed: {e}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"  [X] Candidate rejected by Researcher.")
+                self._execute_trade(best)
             except Exception as e:
-                print(f"[ERROR] Researcher failed: {e}. Skipping trade.")
+                print(f"[ERROR] Trade execution failed: {e}")
                 import traceback
                 traceback.print_exc()
         else:
              print("[SCANNER] No candidates found.")
-
-        # -- Phase 3: Self-Reflection (Critic) --
-        if time.time() - self.last_critic_run > 300: # Run every 5 mins
-            asyncio.create_task(self.critic.analyze_closed_trades())
-            self.last_critic_run = time.time()
 
     def _execute_trade(self, setup):
         symbol = setup['symbol']
@@ -499,16 +430,18 @@ class InstitutionalStrategy:
         return False
 
     def _get_current_session(self):
-        now = datetime.now(timezone.utc).hour
+        now = datetime.now(timezone.utc)
+        current_time = now.hour + now.minute / 60.0
         for name, times in settings.TRADE_SESSIONS.items():
-            if times['start'] <= now < times['end']: return name
+            if times['start'] <= current_time < times['end']: return name
         return 'off_hours'
 
     def _is_trading_session(self):
         if not settings.SESSION_FILTER: return True
-        now = datetime.now(timezone.utc).hour
+        now = datetime.now(timezone.utc)
+        current_time = now.hour + now.minute / 60.0
         for _, times in settings.TRADE_SESSIONS.items():
-            if times['start'] <= now < times['end']: return True
+            if times['start'] <= current_time < times['end']: return True
         return False
 
     def _check_daily_limit(self):

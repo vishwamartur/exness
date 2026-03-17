@@ -529,67 +529,33 @@ class RiskManager:
                 risk = entry_price - current_sl if current_sl > 0 else 0
                 profit = current_price - entry_price
 
-                # 1. Break-Even (Risk Free)
-                # Move to slightly ABOVE entry to cover fees
-                if (risk > 0 and profit >= risk * settings.BREAKEVEN_RR and
-                    ticket not in self.breakeven_set):
-                    
-                    # Target: Entry + 10% of risk (buffer)
+                # 1. Break-Even (Risk Free @ 1R)
+                if (risk > 0 and profit >= risk and ticket not in self.breakeven_set):
                     be_sl = entry_price + (risk * 0.1) 
-                    
                     if be_sl > current_sl:
                         actions.append({
                             'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even'
+                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even @ 1R'
                         })
                         self.breakeven_set.add(ticket)
 
-                # 2. Partial Close (Bank Profits)
-                # Logic: If 50% to TP, close partial fraction
-                if (current_tp > 0 and ticket not in self.partial_closed):
-                    tp_dist = current_tp - entry_price
-                    # If we are 60% of the way to TP, take some off
-                    if profit >= tp_dist * 0.6: 
-                        actions.append({
-                            'type': 'PARTIAL', 'ticket': ticket, 
-                            'fraction': settings.PARTIAL_CLOSE_FRACTION, 'reason': 'Partial Profit'
-                        })
-                        self.partial_closed.add(ticket)
+                # 2. Partial Close (50% @ 1R)
+                if (risk > 0 and profit >= risk and ticket not in self.partial_closed):
+                    actions.append({
+                        'type': 'PARTIAL', 'ticket': ticket, 
+                        'fraction': 0.5, 'reason': 'Partial Profit (50% @ 1R)'
+                    })
+                    self.partial_closed.add(ticket)
 
-                # 3. Trailing Stop (Dynamic ATR or Fixed %)
-                if entry_price > 0:
-                    new_sl = None
-                    reason = ""
-                    
-                    # Preference: ATR Based
-                    if atr and atr > 0:
-                        # Activate if profit > 2 ATR (settings.TRAILING_STOP_ATR_ACTIVATE)
-                        if profit >= settings.TRAILING_STOP_ATR_ACTIVATE * atr:
-                            # Trail behind by 0.5 ATR (settings.TRAILING_STOP_ATR_STEP)
-                            proposed_sl = current_price - (settings.TRAILING_STOP_ATR_STEP * atr)
-                            if proposed_sl > current_sl:
-                                new_sl = proposed_sl
-                                reason = f"Trailing Stop (ATR {atr:.5f})"
-                                
-                    # Fallback: Fixed % (Legacy)
-                    else:
-                        profit_pct = profit / entry_price
-                        if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
-                            proposed_sl = current_price - (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
-                            if proposed_sl > current_sl:
-                                new_sl = proposed_sl
-                                reason = "Trailing Stop (%)"
-                                
-                    # OPTIMIZATION: Only modify if change is significant (> 1 pip/point)
-                    if new_sl:
-                        # Get point size (approximate if not available, or use small value)
-                        # For EURUSD point is 0.00001, for JPY 0.001
-                        # We use 10 points as threshold
+                # 3. Trailing Stop (1.5x ATR)
+                if entry_price > 0 and atr and atr > 0:
+                    proposed_sl = current_price - (1.5 * atr)
+                    if proposed_sl > current_sl:
                         threshold = 0.0001 if "JPY" not in symbol else 0.01 
-                        if abs(new_sl - current_sl) > threshold:
+                        if abs(proposed_sl - current_sl) > threshold:
                             actions.append({
                                 'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': new_sl, 'tp': current_tp, 'reason': reason
+                                'sl': proposed_sl, 'tp': current_tp, 'reason': f"Trailing (1.5x ATR)"
                             })
 
             elif pos.type == mt5.ORDER_TYPE_SELL:
@@ -597,58 +563,33 @@ class RiskManager:
                 risk = current_sl - entry_price if current_sl > 0 else 0
                 profit = entry_price - current_price
 
-                # 1. Break-Even
-                if (risk > 0 and profit >= risk * settings.BREAKEVEN_RR and
-                    ticket not in self.breakeven_set):
-                    
+                # 1. Break-Even (@ 1R)
+                if (risk > 0 and profit >= risk and ticket not in self.breakeven_set):
                     be_sl = entry_price - (risk * 0.1)
-                    
                     if be_sl < current_sl or current_sl == 0:
                         actions.append({
                             'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even'
+                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even @ 1R'
                         })
                         self.breakeven_set.add(ticket)
 
-                # 2. Partial Close
-                if (current_tp > 0 and ticket not in self.partial_closed):
-                    tp_dist = entry_price - current_tp
-                    if profit >= tp_dist * 0.6:
-                        actions.append({
-                            'type': 'PARTIAL', 'ticket': ticket, 
-                            'fraction': settings.PARTIAL_CLOSE_FRACTION, 'reason': 'Partial Profit'
-                        })
-                        self.partial_closed.add(ticket)
+                # 2. Partial Close (50% @ 1R)
+                if (risk > 0 and profit >= risk and ticket not in self.partial_closed):
+                    actions.append({
+                        'type': 'PARTIAL', 'ticket': ticket, 
+                        'fraction': 0.5, 'reason': 'Partial Profit (50% @ 1R)'
+                    })
+                    self.partial_closed.add(ticket)
 
-                # 3. Trailing Stop
-                if entry_price > 0:
-                    new_sl = None
-                    reason = ""
-                    
-                    if atr and atr > 0:
-                        if profit >= settings.TRAILING_STOP_ATR_ACTIVATE * atr:
-                            proposed_sl = current_price + (settings.TRAILING_STOP_ATR_STEP * atr)
-                            if proposed_sl < current_sl or current_sl == 0:
-                                new_sl = proposed_sl
-                                reason = f"Trailing Stop (ATR {atr:.5f})"
-                    else:
-                        profit_pct = profit / entry_price
-                        if profit_pct > settings.TRAILING_STOP_ACTIVATE_PERCENT:
-                            proposed_sl = current_price + (settings.TRAILING_STOP_STEP_PERCENT * entry_price)
-                            if proposed_sl < current_sl or current_sl == 0:
-                                new_sl = proposed_sl
-                                reason = "Trailing Stop (%)"
-
-                    # OPTIMIZATION: Threshold check
-                    if new_sl:
+                # 3. Trailing Stop (1.5x ATR)
+                if entry_price > 0 and atr and atr > 0:
+                    proposed_sl = current_price + (1.5 * atr)
+                    if proposed_sl < current_sl or current_sl == 0:
                         threshold = 0.0001 if "JPY" not in symbol else 0.01
-                         # For Sell, new_sl is lower (closer to price) or we are moving it down?
-                         # Trailing for SELL: SL moves DOWN as price drops.
-                         # current_sl is above price. new_sl should be lower than current_sl.
-                        if abs(new_sl - current_sl) > threshold:
+                        if abs(proposed_sl - current_sl) > threshold:
                             actions.append({
                                 'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': new_sl, 'tp': current_tp, 'reason': reason
+                                'sl': proposed_sl, 'tp': current_tp, 'reason': f"Trailing (1.5x ATR)"
                             })
 
         return actions

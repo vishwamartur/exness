@@ -69,8 +69,8 @@ DEVIATION = int(os.getenv("DEVIATION", 20))
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
 # ─── Institutional Risk Management ───────────────────────────────────────
-RISK_PERCENT = float(os.getenv("RISK_PERCENT", 2.0))       # Risk 2% of account per trade
-MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 5.0))  # Max risk for A+ setups (confluence >= 5)
+RISK_PERCENT = float(os.getenv("RISK_PERCENT", 0.5))       # Risk 0.5% of account per trade
+MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 1.0))  # Max risk for A+ setups
 
 # ATR-Based Dynamic SL/TP (replaces fixed pips)
 ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.0))  # 1.0x ATR for strict Risk limit
@@ -95,8 +95,8 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit mu
 #─── Trade Management────────────────────────────────────────────────────
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 1800))  # 30 minutes between trades (HFT disabled for retail)
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 1))     # STRICT: 1 max per symbol (Quality over Quantity)
-MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 5.0)) # Hard stop if daily loss > $5
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 3))     # STRICT: 3 max per symbol (Quality over Quantity)
+MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 100.0)) # Hard stop if daily loss > $100
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 2))  # Strict: 2 max for micro-account safety
 LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 60)) # Prevents stale limit gaps
 MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 2))  # Hard cap concurrent trades
@@ -163,9 +163,8 @@ NEWS_POST_MINUTES = int(os.getenv("NEWS_POST_MINUTES", 15)) # Block 15 min after
 
 # ─── Session Awareness (UTC hours) ──────────────────────────────────────
 TRADE_SESSIONS = {
-    "london":    {"start": 8,  "end": 16},  # London (08:00 - 16:00 UTC)
-    "new_york":  {"start": 13, "end": 21},  # New York (13:00 - 21:00 UTC)
-    "overlap":   {"start": 13, "end": 16},  # Overlap
+    "london_open": {"start": 7.0, "end": 7.5},   # London (07:00 - 07:30 UTC)
+    "ny_open":     {"start": 13.0, "end": 13.5}, # New York (13:00 - 13:30 UTC)
 }
 SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"
 
@@ -214,7 +213,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ─── Statistical Arbitrage Settings ──────────────────────────────────────
 # Define known macro-correlated pairs to constantly monitor for divergence
-STAT_ARB_PAIRS = [("AUDUSD", "NZDUSD"), ("EURUSD", "GBPUSD"), ("XAUUSD", "XAGUSD")]
+STAT_ARB_PAIRS = [("XAUUSD", "DXY")]  # Focus on Gold vs USD divergence
 STAT_ARB_MAX_ZSCORE = float(os.getenv("STAT_ARB_MAX_ZSCORE", 2.0)) # ±2.0 Standard Deviations triggers a hedge trade
 STAT_ARB_LOT_SIZE = float(os.getenv("STAT_ARB_LOT_SIZE", 0.01))    # Fixed micro-lot sizing for hedge legs
 
