@@ -257,7 +257,7 @@ class PairAgent:
         if atr > 0 and 'atr' in df_scan.columns and len(df_scan) >= 100:
             atr_100_avg = df_scan['atr'].rolling(window=100).mean().iloc[-1]
             if atr < 0.20 * atr_100_avg:
-                return None, f"Market Too Dead (ATR < 20% of 100-period avg)"
+                return None, "Market Too Dead (ATR < 20% of 100-period avg)"
 
         # 3. Spread-Adjusted TP/SL
         tick = mt5.symbol_info_tick(self.symbol)
