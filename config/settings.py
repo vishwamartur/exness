@@ -21,7 +21,7 @@ SYMBOL = os.getenv("SYMBOL", "EURUSD")
 # Pruned for Expectancy Improvement (Focus on majors/crypto)
 # Temporarily commenting out negative expectancy pairs provided by user analysis
 SYMBOLS_FOREX_MAJORS_BASE = [
-    "EURUSD", "GBPUSD", "USDJPY", # "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+    # "EURUSD", "GBPUSD", "USDJPY",  # Disabled — XAUUSD only
 ]
 
 SYMBOLS_FOREX_MINORS_BASE = [
@@ -33,15 +33,14 @@ SYMBOLS_FOREX_MINORS_BASE = [
 ]
 
 SYMBOLS_CRYPTO_BASE = [
-    "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "BCHUSD",
-    "BTCJPY", "BTCKRW",
+    # "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "BCHUSD",  # Disabled — XAUUSD only
+    # "BTCJPY", "BTCKRW",
 ]
 
 SYMBOLS_COMMODITIES_BASE = [
-    "XAUUSD", "XAGUSD",           # Gold, Silver
-    "XPTUSD", "XPDUSD",           # Platinum, Palladium
-    "USOIL", "UKOIL",             # Crude Oil
-    "XNGUSD",                      # Natural Gas
+    "XAUUSD",                      # Gold only — focused mode
+    # "XAGUSD", "XPTUSD", "XPDUSD",  # Disabled
+    # "USOIL", "UKOIL", "XNGUSD",    # Disabled
 ]
 
 # Exness account suffixes to try during auto-detection
@@ -62,25 +61,25 @@ SYMBOLS_COMMODITIES = []
 # Symbol Blacklist (high commission, low liquidity)
 BLACKLISTED_SYMBOLS = os.getenv("BLACKLISTED_SYMBOLS", "XPDUSD").split(",")
 
-TIMEFRAME = "H1"  # Shifted to H1 for structural Risk:Reward trading (Scalping disabled)
+TIMEFRAME = "M5"  # M5 scalping mode — fast XAUUSD entries
 print(f"[SETTINGS] TIMEFRAME set to: {TIMEFRAME}")
-LOT_SIZE = float(os.getenv("LOT_SIZE", 0.01))  # EXTREME SAFETY: 0.01 Micro-lots for $63 account
-DEVIATION = int(os.getenv("DEVIATION", 20))
+LOT_SIZE = float(os.getenv("LOT_SIZE", 0.01))  # Base lot size
+DEVIATION = int(os.getenv("DEVIATION", 30))     # Wider deviation for Gold volatility
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
 # ─── Institutional Risk Management ───────────────────────────────────────
-RISK_PERCENT = float(os.getenv("RISK_PERCENT", 0.5))       # Risk 0.5% of account per trade
-MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 1.0))  # Max risk for A+ setups
+RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))       # 1% risk per scalp (XAUUSD focus)
+MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 2.0))  # 2% max for A+ Gold setups
 
-# ATR-Based Dynamic SL/TP (replaces fixed pips)
-ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.0))  # 1.0x ATR for strict Risk limit
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))  # 3.0x ATR for strict 1:3 Reward target
+# ATR-Based Dynamic SL/TP — tight SL, wide TP for Gold scalping
+ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 0.8))  # 0.8x ATR — tight SL for quick scalps
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.0))  # 2.0x ATR — 1:2.5 R:R target
 
-# Confluence Gating
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 4))  # STRICT: Require 4 module agreements
-SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 6))     # STRICT: Sureshot at 6
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.65))   # STRICT: Require 65% ML Confidence (filter out 50/50 coinflips)
-MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.8)) # Force asymmetric upside
+# Confluence Gating — relaxed for more trade opportunities
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # Relaxed: 2 modules agree
+SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 4))     # Sureshot at 4
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.52))   # Relaxed: >52% ML edge is enough
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.2)) # 1:1.2 minimum R:R
 
 # ─── Kelly Criterion Position Sizing ─────────────────────────────────────
 USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Criterion
@@ -93,16 +92,16 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit mu
 
 
 #─── Trade Management────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 1800))  # 30 minutes between trades (HFT disabled for retail)
-RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))  # Capped for safety
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 3))     # STRICT: 3 max per symbol (Quality over Quantity)
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 120))    # 2-minute cooldown for scalping
+RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 2.0))    # Scale up to 2x on A+ setups
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 9999))   # Unlimited trades (XAUUSD focus)
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 100.0)) # Hard stop if daily loss > $100
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 2))  # Strict: 2 max for micro-account safety
-LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 60)) # Prevents stale limit gaps
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 2))  # Hard cap concurrent trades
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 50))  # Unlimited positions (XAUUSD focus)
+LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 10)) # Short expiry for scalps
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 10))  # Allow multiple Gold positions
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
-MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto (~$200 spread allowed)
-MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 150.0))  # Commodities (~$0.50 spread on Gold)
+MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto
+MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 80.0))  # Tighter for Gold scalping
 
 # ─── Volatility-Adaptive Entry ───────────────────────────────────────────
 # Minimum ATR required to enter a scalp trade (avoid dead/ranging markets)
@@ -110,12 +109,13 @@ VOLATILITY_ATR_MIN = float(os.getenv("VOLATILITY_ATR_MIN", 0.00015))  # 1.5 pips
 VOLATILITY_ATR_MIN_CRYPTO = float(os.getenv("VOLATILITY_ATR_MIN_CRYPTO", 50.0))  # $50 min for Crypto
 VOLATILITY_ATR_MIN_COMMODITY = float(os.getenv("VOLATILITY_ATR_MIN_COMMODITY", 0.5))  # 50c min for Commodities
 
-# ─── Strict Scalp Session Windows (UTC) ──────────────────────────────────
-# ONLY trade during London Open and NY Open for tight spreads + volume
-SCALP_SESSION_FILTER = False # Disabled - Taking valid structural R:R setups at any time
+# ─── XAUUSD Scalp Session Windows (UTC) ──────────────────────────────────
+# Gold trades 23h/day — trade all liquid sessions
+SCALP_SESSION_FILTER = False  # Disabled — Gold is liquid almost 24/5
 SCALP_SESSIONS = [
-    {"name": "London Open", "start": 7, "end": 10},   # 07:00-10:00 UTC
-    {"name": "NY Open",     "start": 13, "end": 16},  # 13:00-16:00 UTC
+    {"name": "London Open",    "start": 7,  "end": 11},   # 07:00-11:00 UTC
+    {"name": "NY Open",        "start": 13, "end": 17},   # 13:00-17:00 UTC
+    {"name": "London/NY Overlap", "start": 13, "end": 16}, # Best Gold liquidity
 ]
 
 # ─── Advanced Risk Controls (P&L Distribution Correction) ────────────────
@@ -140,15 +140,15 @@ MANDATE_MIN_RR = True  # Enforce, but only for symbols NOT in RISK_OVERRIDE_SYMB
 AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0))
 
 # Trailing Stop (ATR Based)
-TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 4.0)) # Effectively disabled (Requires 4 R to trail)
-TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 1.0))         # Trail behind by 1.0 ATR
+TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 1.5)) # Activate trail at 1.5R profit (Gold scalps)
+TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 0.5))         # Trail behind by 0.5 ATR (tight for scalps)
 # Legacy Fixed % (keeping for backwards compatibility if needed, but primary is ATR)
 TRAILING_STOP_ACTIVATE_PERCENT = float(os.getenv("TRAILING_ACTIVATE", 0.005))
 TRAILING_STOP_STEP_PERCENT = float(os.getenv("TRAILING_STEP", 0.001))
 
 # Partial Profit Taking
-PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.25))  # Close 25% (Let winners run)
-BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 0.8))  # Move SL to breakeven at 0.8R (Was 0.6R)
+PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.50))  # Close 50% at TP1 for scalps (lock profit)
+BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 0.5))  # Breakeven at 0.5R — protect capital fast
 
 # ─── Multi-Timeframe Trend Filters ───────────────────────────────────────
 M5_TREND_FILTER = os.getenv("M5_TREND_FILTER", "True").lower() == "true"   # M5 confirms M1 direction
@@ -166,12 +166,13 @@ FAKE_NEWS_DETECTION_ENABLED = os.getenv("FAKE_NEWS_DETECTION_ENABLED", "True").l
 FAKE_NEWS_MIN_CREDIBILITY = float(os.getenv("FAKE_NEWS_MIN_CREDIBILITY", 0.4))    # Below this = flagged suspicious
 FAKE_NEWS_DISCOUNT_FACTOR = float(os.getenv("FAKE_NEWS_DISCOUNT_FACTOR", 0.1))    # Reduce news weight to 10% when flagged
 
-# ─── Session Awareness (UTC hours) ──────────────────────────────────────
+# ─── Session Awareness (UTC hours) — widened for XAUUSD scalping ─────────
 TRADE_SESSIONS = {
-    "london_open": {"start": 7.0, "end": 7.5},   # London (07:00 - 07:30 UTC)
-    "ny_open":     {"start": 13.0, "end": 13.5}, # New York (13:00 - 13:30 UTC)
+    "london":      {"start": 7.0, "end": 11.0},  # London session (4 hours)
+    "ny":          {"start": 13.0, "end": 17.0},  # New York session (4 hours)
+    "overlap":     {"start": 13.0, "end": 16.0},  # London/NY overlap (peak Gold)
 }
-SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"
+SESSION_FILTER = os.getenv("SESSION_FILTER", "False").lower() == "true"  # Disabled — Gold 24/5
 
 # --- Data Settings -----------------------------------------------------------
 # 10 years of M15 data: 10 * 252 days * 96 bars/day = ~242,000 bars
