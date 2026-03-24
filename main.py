@@ -14,6 +14,7 @@ from execution.mt5_client import MT5Client
 from strategy.institutional_strategy import InstitutionalStrategy
 from utils.auto_trainer import AutoTrainer
 from api import stream_server as stream
+from market_data.massive_feed import get_massive_feed
 
 
 def main():
@@ -69,6 +70,14 @@ def main():
     except Exception as e:
         print(f"[ERROR] Stream Server failed: {e}")
         
+    # 6. Start Massive.com WebSocket Feed
+    if getattr(settings, 'MASSIVE_ENABLED', False) and getattr(settings, 'MASSIVE_WS_ENABLED', False):
+        try:
+            feed = get_massive_feed()
+            feed.start()
+        except Exception as e:
+            print(f"[ERROR] Massive.com Feed failed to start: {e}")
+            
     print(f"\nScanner ready. {len(settings.SYMBOLS)} instruments | "
           f"Self-learning active | Trade journal active\n")
     

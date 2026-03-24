@@ -221,3 +221,20 @@ STAT_ARB_LOT_SIZE = float(os.getenv("STAT_ARB_LOT_SIZE", 0.01))    # Fixed micro
 # How much exposure to a single currency (e.g. USD) is allowed across the entire portfolio?
 # If buying GBPUSD pushes our net USD short exposure past MAX_PORTFOLIO_CORRELATION, block it.
 MAX_PORTFOLIO_CORRELATION = float(os.getenv("MAX_PORTFOLIO_CORRELATION", 0.75))
+
+# ─── MiroFish Prediction Engine ──────────────────────────────────────────
+MIROFISH_ENABLED = os.getenv("MIROFISH_ENABLED", "False").lower() == "true"
+MIROFISH_API_URL = os.getenv("MIROFISH_API_URL", "http://localhost:5001")
+MIROFISH_SIMULATION_ROUNDS = int(os.getenv("MIROFISH_SIMULATION_ROUNDS", 20))
+MIROFISH_CACHE_MINUTES = int(os.getenv("MIROFISH_CACHE_MINUTES", 60))
+MIROFISH_MAX_CONFLUENCE_BONUS = 1  # Max +1 to confluence score from MiroFish
+
+# ─── Massive.com Financial Data ──────────────────────────────────────────
+MASSIVE_ENABLED = os.getenv("MASSIVE_ENABLED", "True").lower() == "true"
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY", "")
+MASSIVE_ACCESS_KEY_ID = os.getenv("MASSIVE_ACCESS_KEY_ID", "")
+MASSIVE_SECRET_ACCESS_KEY = os.getenv("MASSIVE_SECRET_ACCESS_KEY", "")
+MASSIVE_S3_ENDPOINT = os.getenv("MASSIVE_S3_ENDPOINT", "https://files.massive.com")
+MASSIVE_S3_BUCKET = os.getenv("MASSIVE_S3_BUCKET", "flatfiles")
+MASSIVE_WS_ENABLED = os.getenv("MASSIVE_WS_ENABLED", "True").lower() == "true"  # Real-time WebSocket feed
+MASSIVE_REST_FALLBACK = os.getenv("MASSIVE_REST_FALLBACK", "True").lower() == "true"  # Use REST when MT5 fails

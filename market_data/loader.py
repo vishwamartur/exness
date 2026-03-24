@@ -10,6 +10,7 @@ import warnings
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import settings
+from market_data.massive_client import get_rest_client, mt5_to_massive
 
 # Timeframe string to MT5 constant map
 TF_MAP = {
@@ -77,6 +78,20 @@ def get_historical_data(symbol, timeframe_str, n_bars, use_cache=True):
                 return (df, False)  # Cached data is not truncated
             except Exception as e:
                 print(f"  [{symbol}] Failed to read cache: {e}. Re-fetching...")
+
+    # ─── Massive.com Data Fetch (REST Fallback) ──────────────────────────
+    if getattr(settings, 'MASSIVE_ENABLED', False) and getattr(settings, 'MASSIVE_REST_FALLBACK', True):
+        massive_ticker = mt5_to_massive(symbol)
+        if massive_ticker:
+            # Massive only supports up to 50k bars per REST request easily
+            # We will use it if it's less than 50k, or we could paginate. Our client handles up to 50k.
+            if n_bars <= 50000:
+                print(f"  [{symbol}] Fetching {n_bars} bars from Massive.com (REST)...")
+                client = get_rest_client()
+                df = client.get_aggregates(symbol, timeframe_str, n_bars)
+                if df is not None and len(df) > 0:
+                    return (df, False)
+                print(f"  [{symbol}] Failed to fetch from Massive.com, falling back to MT5...")
 
     if not mt5.terminal_info():
         if not initial_connect():

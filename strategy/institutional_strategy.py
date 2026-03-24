@@ -1,11 +1,12 @@
 """
-Institutional Trading Strategy - v2.2 Agentic Architecture (Per-Pair Agents)
+Institutional Trading Strategy - v2.3 Agentic Architecture (Per-Pair Agents)
 ============================================================================
 Transitioned to Multi-Agent System (Phase 3):
 1. PairAgent: dedicated agent for each symbol.
 2. Quant Agent: Shared ML/Analysis resource.
 3. Market Analyst: Shared Regime resource.
 4. Risk Agent: Global and Per-Pair Risk Management.
+5. MiroFish Agent: Swarm Intelligence Market Prediction (Optional).
 """
 
 import os
@@ -61,6 +62,15 @@ class InstitutionalStrategy:
         self.quant = QuantAgent()
         self.pre_trade_analyzer = PreTradeAnalyzer(self.quant, self.analyst)
         
+        # --- MIROFISH AGENT (Optional) -----------------------------------
+        self.mirofish = None
+        if getattr(settings, 'MIROFISH_ENABLED', False):
+            try:
+                from analysis.mirofish_agent import MiroFishAgent
+                self.mirofish = MiroFishAgent()
+            except Exception as e:
+                print(f"[MIROFISH] Failed to initialize: {e}")
+        
         # --- STATE -------------------------------------------------------
         self.last_trade_time = {}
         self.daily_trade_count = 0
@@ -80,7 +90,8 @@ class InstitutionalStrategy:
                 symbol=symbol,
                 quant_agent=self.quant,
                 analyst_agent=self.analyst,
-                risk_manager=self.risk_manager
+                risk_manager=self.risk_manager,
+                mirofish_agent=self.mirofish
             )
 
         # Telegram startup greeting

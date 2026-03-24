@@ -15,3 +15,6 @@ ujson
 aiohttp
 tqdm
 hmmlearn
+requests
+boto3
+websocket-client

@@ -28,11 +28,12 @@ class PairAgent:
     Dedicated AI Agent for a single currency pair.
     Manages state, performance, and scanning for its specific symbol.
     """
-    def __init__(self, symbol: str, quant_agent, analyst_agent, risk_manager):
+    def __init__(self, symbol: str, quant_agent, analyst_agent, risk_manager, mirofish_agent=None):
         self.symbol = symbol
         self.quant = quant_agent
         self.analyst = analyst_agent
         self.risk_manager = risk_manager
+        self.mirofish = mirofish_agent  # Optional MiroFish prediction agent
         self.journal = TradeJournal()
         self.sentiment_analyzer = get_sentiment_analyzer()
         self.pattern_memory = get_pattern_memory()  # RAG for historical patterns
@@ -365,6 +366,22 @@ class PairAgent:
                 inst_scale = self.flow_detector.get_position_scale(signal, inst_flow)
                 print(f"[{self.symbol}] Inst Flow boost: +1 score, scale={inst_scale}x (flow={flow_dir}, score={inst_flow['score']})")
 
+        # MiroFish Swarm Intelligence Boost
+        mf_bonus = 0
+        mf_direction = 'NEUTRAL'
+        mf_confidence = 0
+        if self.mirofish is not None:
+            try:
+                mf_bonus = self.mirofish.get_confluence_bonus(self.symbol, signal)
+                mf_direction, mf_confidence = self.mirofish.get_symbol_signal(self.symbol)
+                if mf_bonus > 0:
+                    score = min(6, score + mf_bonus)
+                    print(f"[{self.symbol}] MiroFish boost: +{mf_bonus} score (prediction={mf_direction}, confidence={mf_confidence}%)")
+                else:
+                    print(f"[{self.symbol}] MiroFish: {mf_direction} ({mf_confidence}%) — no boost")
+            except Exception as e:
+                print(f"[{self.symbol}] MiroFish error (non-blocking): {e}")
+
         candidate = {
             'symbol': self.symbol,
             'direction': signal,
@@ -386,6 +403,9 @@ class PairAgent:
             'inst_flow_score': inst_flow.get('score', 0),
             'inst_flow_direction': inst_flow.get('direction', 'NEUTRAL'),
             'inst_flow_details': inst_flow.get('details', {}),
+            'mirofish_direction': mf_direction,
+            'mirofish_confidence': mf_confidence,
+            'mirofish_bonus': mf_bonus,
             'rl_action': 'PPO_CONTROLLED',
             'rl_confidence': 1.0,
             'rl_aligned': True,
