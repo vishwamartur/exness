@@ -60,6 +60,7 @@ InstitutionalStrategy (Orchestrator)
 | **Partial Close / Breakeven** | Locks in profit at 0.8R, closes 25% at first TP |
 | **Trailing Stop** | ATR-based — activates at 2× ATR profit, trails 0.5× ATR |
 | **News Blackout** | Skips pairs during high-impact calendar events |
+| **Fake News Detection** | 5-signal credibility scorer discounts suspicious news before it influences trades |
 | **Spread Gate** | Skips pairs with spread > configurable max |
 | **NEUTRAL Guard** | Hard block — only BUY or SELL can be executed |
 | **Adaptive Position Management** | Real-time ML-based position optimization (hold/expand/close) |
@@ -93,6 +94,21 @@ Advanced pre-trade analysis system that prevents poor entry timing:
 - **Volatility Assessment**: Evaluates current market volatility for risk management
 - **Momentum Analysis**: Checks RSI, MACD, and other momentum indicators
 - **Regime Awareness**: Adjusts decisions based on market regime (Risk-On/Risk-Off)
+
+### 🛡️ Fake News Detection
+
+Multi-signal credibility engine that prevents the bot from acting on manipulated or unverified news:
+
+| Signal | Weight | What It Checks |
+|--------|--------|----------------|
+| **Source Reputation** | 25% | Tiered whitelist (Reuters/Bloomberg → 1.0, Twitter/Telegram → 0.2) |
+| **Cross-Source Corroboration** | 25% | Same claim reported by multiple independent sources |
+| **Gemini AI Verification** | 20% | LLM plausibility check against current market conditions |
+| **Linguistic Red Flags** | 15% | Clickbait, ALL-CAPS, sensationalism, hype language |
+| **Temporal Consistency** | 15% | Event timing vs business hours (weekend Fed = suspicious) |
+
+- Credibility score < 0.4 → news weight reduced from 70% to 7%
+- Configurable via `FAKE_NEWS_MIN_CREDIBILITY` and `FAKE_NEWS_DISCOUNT_FACTOR`
 
 **Decision Process**:
 1. **Trend Capture**: Ensures alignment across multiple timeframes
@@ -173,6 +189,11 @@ MAX_DAILY_TRADES=20
 MAX_DAILY_LOSS_USD=50
 SCALP_SESSION_FILTER=True
 
+# Fake News Detection
+FAKE_NEWS_DETECTION_ENABLED=True
+FAKE_NEWS_MIN_CREDIBILITY=0.4
+FAKE_NEWS_DISCOUNT_FACTOR=0.1
+
 # AI (at least one required for ResearcherAgent)
 GROQ_API_KEY=your_groq_key
 MISTRAL_API_KEY=your_mistral_key
@@ -248,7 +269,10 @@ mt5/
 │   ├── market_analyst.py      # Macro regime classification (LLM)
 │   ├── quant_agent.py         # SMC + ML confluence scoring
 │   ├── researcher_agent.py    # Bull vs Bear LLM debate
-│   └── critic_agent.py        # Post-trade review
+│   ├── critic_agent.py        # Post-trade review
+│   ├── fake_news_detector.py  # 5-signal news credibility scorer
+│   ├── sentiment_analyzer.py  # Combined news + technical sentiment
+│   └── gemini_news_analyzer.py # Gemini AI news analysis
 │
 ├── utils/
 │   ├── risk_manager.py        # Kill switch, payoff mandate, position sizing

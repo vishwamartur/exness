@@ -11,6 +11,7 @@ from typing import Dict, Optional
 import re
 
 from analysis.gemini_news_analyzer import get_gemini_analyzer
+from analysis.fake_news_detector import get_fake_news_detector
 
 class SentimentAnalyzer:
     """
@@ -23,6 +24,7 @@ class SentimentAnalyzer:
     def __init__(self):
         self.api_key = os.getenv("NEWS_API_KEY", "")
         self.gemini = get_gemini_analyzer()
+        self.fake_news = get_fake_news_detector()
         self.cache = {}
         self.cache_duration = 300  # 5 minutes
         
@@ -43,8 +45,33 @@ class SentimentAnalyzer:
         # Get technical sentiment (from price action)
         tech_sentiment = await self._analyze_technical_sentiment(symbol)
         
-        # Combine: 70% news (Gemini), 30% technical
-        combined_score = (news_sentiment['score'] * 0.7 + tech_sentiment['score'] * 0.3)
+        # ── Fake News Credibility Gate ──────────────────────────────────
+        from config import settings
+        news_weight = 0.7  # Default: 70% news, 30% technical
+        fake_news_flags = []
+        credibility_score = 1.0
+
+        if getattr(settings, 'FAKE_NEWS_DETECTION_ENABLED', False):
+            key_events = news_sentiment.get('key_events', [])
+            reasoning = news_sentiment.get('reasoning', '')
+            headline = reasoning or (key_events[0] if key_events else '')
+
+            if headline:
+                credibility = self.fake_news.assess_credibility(
+                    headline=headline,
+                    source=news_sentiment.get('source', 'unknown'),
+                    symbol=symbol,
+                )
+                credibility_score = credibility.get('credibility_score', 1.0)
+                fake_news_flags = credibility.get('flags', [])
+
+                # Discount news weight if not trusted
+                weight_mult = self.fake_news.get_news_weight_multiplier(credibility)
+                news_weight *= weight_mult
+
+        tech_weight = 1.0 - news_weight
+        # Combine with adjusted weights
+        combined_score = (news_sentiment['score'] * news_weight + tech_sentiment['score'] * tech_weight)
         combined_confidence = max(news_sentiment['confidence'], tech_sentiment['confidence'])
         
         result = {
@@ -52,11 +79,14 @@ class SentimentAnalyzer:
             'confidence': round(combined_confidence, 3),
             'news_score': news_sentiment['score'],
             'tech_score': tech_sentiment['score'],
+            'news_weight': round(news_weight, 2),
             'source': news_sentiment.get('source', 'combined'),
             'direction_bias': news_sentiment.get('direction_bias', 'NEUTRAL'),
             'key_events': news_sentiment.get('key_events', []),
             'risk_level': news_sentiment.get('risk_level', 'MEDIUM'),
             'reasoning': news_sentiment.get('reasoning', ''),
+            'credibility_score': credibility_score,
+            'fake_news_flags': fake_news_flags,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         

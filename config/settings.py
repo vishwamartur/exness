@@ -161,6 +161,11 @@ NEWS_CALENDAR_CACHE_MINUTES = int(os.getenv("NEWS_CALENDAR_CACHE_MINUTES", 60)) 
 NEWS_PRE_MINUTES = int(os.getenv("NEWS_PRE_MINUTES", 15))   # Block 15 min before high-impact news
 NEWS_POST_MINUTES = int(os.getenv("NEWS_POST_MINUTES", 15)) # Block 15 min after high-impact news
 
+# ─── Fake News Detection ─────────────────────────────────────────────────
+FAKE_NEWS_DETECTION_ENABLED = os.getenv("FAKE_NEWS_DETECTION_ENABLED", "True").lower() == "true"
+FAKE_NEWS_MIN_CREDIBILITY = float(os.getenv("FAKE_NEWS_MIN_CREDIBILITY", 0.4))    # Below this = flagged suspicious
+FAKE_NEWS_DISCOUNT_FACTOR = float(os.getenv("FAKE_NEWS_DISCOUNT_FACTOR", 0.1))    # Reduce news weight to 10% when flagged
+
 # ─── Session Awareness (UTC hours) ──────────────────────────────────────
 TRADE_SESSIONS = {
     "london_open": {"start": 7.0, "end": 7.5},   # London (07:00 - 07:30 UTC)
