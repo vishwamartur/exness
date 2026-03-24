@@ -353,8 +353,10 @@ class InstitutionalStrategy:
 
         # Sizing
         lot = self.risk_manager.calculate_position_size(
-            symbol, sl_dist, score, setup['scaling_factor'],
-            ml_prob=setup.get('ml_prob')
+            symbol, sl_dist, score, setup.get('scaling_factor', 1.0),
+            ml_prob=setup.get('ml_prob'),
+            emotion_state=setup.get('emotion_state', 'NEUTRAL'),
+            emotion_score=setup.get('emotion_score', 0.5)
         )
         
         tick = mt5.symbol_info_tick(symbol)

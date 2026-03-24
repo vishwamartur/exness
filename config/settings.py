@@ -139,16 +139,33 @@ MANDATE_MIN_RR = True  # Enforce, but only for symbols NOT in RISK_OVERRIDE_SYMB
 # Threshold raised 1.0 -> 2.0: only blocks if AvgLoss > 2x AvgWin (truly bad symbols)
 AVG_LOSS_RATIO_THRESHOLD = float(os.getenv("AVG_LOSS_RATIO_THRESHOLD", 2.0))
 
-# Trailing Stop (ATR Based)
-TRAILING_STOP_ATR_ACTIVATE = float(os.getenv("TRAILING_STOP_ATR_ACTIVATE", 1.5)) # Activate trail at 1.5R profit (Gold scalps)
-TRAILING_STOP_ATR_STEP = float(os.getenv("TRAILING_STOP_ATR_STEP", 0.5))         # Trail behind by 0.5 ATR (tight for scalps)
-# Legacy Fixed % (keeping for backwards compatibility if needed, but primary is ATR)
-TRAILING_STOP_ACTIVATE_PERCENT = float(os.getenv("TRAILING_ACTIVATE", 0.005))
-TRAILING_STOP_STEP_PERCENT = float(os.getenv("TRAILING_STEP", 0.001))
+# ─── Smart Exit System (Let Winners Run, Cut Losers Fast) ────────────────
+# Philosophy: NO fixed TP. Trailing SL is the only exit for winners.
+#             Losers are cut early when momentum reverses against position.
+SMART_EXIT_ENABLED = os.getenv("SMART_EXIT_ENABLED", "True").lower() == "true"
 
-# Partial Profit Taking
-PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.50))  # Close 50% at TP1 for scalps (lock profit)
-BREAKEVEN_RR = float(os.getenv("BREAKEVEN_RR", 0.5))  # Breakeven at 0.5R — protect capital fast
+# Progressive Trailing — trail distance TIGHTENS as profit grows
+TRAIL_ACTIVATE_ATR = float(os.getenv("TRAIL_ACTIVATE_ATR", 0.3))    # Start trailing at 0.3x ATR profit
+TRAIL_INITIAL_ATR = float(os.getenv("TRAIL_INITIAL_ATR", 1.0))      # Initial trail: 1.0x ATR behind
+TRAIL_TIGHT_ATR = float(os.getenv("TRAIL_TIGHT_ATR", 0.4))          # Tighten to 0.4x ATR at 3R+ profit
+TRAIL_RATCHET_FACTOR = float(os.getenv("TRAIL_RATCHET_FACTOR", 0.7)) # Trail can only move IN favor (ratchet)
+
+# Breakeven — move SL to entry ASAP to eliminate risk
+BREAKEVEN_ACTIVATE_ATR = float(os.getenv("BREAKEVEN_ACTIVATE_ATR", 0.5))  # BE at 0.5x ATR profit
+BREAKEVEN_BUFFER_ATR = float(os.getenv("BREAKEVEN_BUFFER_ATR", 0.05))     # Tiny buffer above entry (covers spread)
+
+# Early Loss Cutting — close losers when market turns against them
+EARLY_CUT_ENABLED = os.getenv("EARLY_CUT_ENABLED", "True").lower() == "true"
+EARLY_CUT_LOSS_ATR = float(os.getenv("EARLY_CUT_LOSS_ATR", 0.5))    # If losing > 0.5x ATR AND momentum against → cut
+EARLY_CUT_RSI_THRESHOLD = float(os.getenv("EARLY_CUT_RSI_THRESHOLD", 35.0))  # RSI below 35 for longs = cut
+EARLY_CUT_MACD_BARS = int(os.getenv("EARLY_CUT_MACD_BARS", 3))      # 3 bars of MACD against = cut
+
+# Partial Close at breakeven (lock some profit risk-free)
+PARTIAL_AT_BE = os.getenv("PARTIAL_AT_BE", "True").lower() == "true"
+PARTIAL_CLOSE_FRACTION = float(os.getenv("PARTIAL_CLOSE_FRACTION", 0.30))  # Close 30% at BE (keep 70% running)
+
+# Remove fixed TP — TP is set very wide (10x ATR) as safety net only
+TP_SAFETY_ATR = float(os.getenv("TP_SAFETY_ATR", 10.0))  # Emergency TP at 10x ATR (rarely hit)
 
 # ─── Multi-Timeframe Trend Filters ───────────────────────────────────────
 M5_TREND_FILTER = os.getenv("M5_TREND_FILTER", "True").lower() == "true"   # M5 confirms M1 direction

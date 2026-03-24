@@ -230,25 +230,32 @@ class QuantAgent:
         last = df.iloc[-1]
         
         # Trends
-        if getattr(settings, 'M5_TREND_FILTER', False):
-            # Strict M5 Alignment for Scalping
-            if direction=="buy" and m5==-1: return 0, {'M5':'BLOCK'}
-            if direction=="sell" and m5==1: return 0, {'M5':'BLOCK'}
-            if (direction=="buy" and m5==1) or (direction=="sell" and m5==-1):
-                score+=1; details['M5']='OK'
-            else: details['M5']='-'
+        # Check M5
+        if (direction=="buy" and m5==1) or (direction=="sell" and m5==-1):
+            score+=1; details['M5']='OK'
+        else: 
+            details['M5']='-'
+            if getattr(settings, 'M5_TREND_FILTER', False):
+                if (direction=="buy" and m5==-1) or (direction=="sell" and m5==1): 
+                    return 0, {'M5':'BLOCK'}
 
-        if settings.H4_TREND_FILTER:
-            if direction=="buy" and h4==-1: return 0, {'H4':'BLOCK'}
-            if direction=="sell" and h4==1: return 0, {'H4':'BLOCK'}
-            if (direction=="buy" and h4==1) or (direction=="sell" and h4==-1):
-                score+=1; details['H4']='OK'
-            else: details['H4']='-'
+        # Check H4
+        if (direction=="buy" and h4==1) or (direction=="sell" and h4==-1):
+            score+=1; details['H4']='OK'
+        else: 
+            details['H4']='-'
+            if getattr(settings, 'H4_TREND_FILTER', False):
+                if (direction=="buy" and h4==-1) or (direction=="sell" and h4==1): 
+                    return 0, {'H4':'BLOCK'}
             
-        if settings.H1_TREND_FILTER:
-            if (direction=="buy" and h1>=1) or (direction=="sell" and h1<=-1):
-                score+=1; details['H1']='OK'
-            else: details['H1']='-'
+        # Check H1
+        if (direction=="buy" and h1>=1) or (direction=="sell" and h1<=-1):
+            score+=1; details['H1']='OK'
+        else: 
+            details['H1']='-'
+            if getattr(settings, 'H1_TREND_FILTER', False):
+                if (direction=="buy" and h1<=-1) or (direction=="sell" and h1>=1): 
+                    return 0, {'H1':'BLOCK'}
             
         # ML & AI
         threshold = settings.RF_PROB_THRESHOLD

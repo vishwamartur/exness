@@ -417,14 +417,27 @@ class RiskManager:
 
         return False, ""
 
-    def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0, ml_prob=None):
+    def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0, ml_prob=None, emotion_state='NEUTRAL', emotion_score=0.5):
         """
         Calculates dynamic lot size using Quarter-Kelly when history available.
         Falls back to confluence tiers when insufficient trade history.
         
         ml_prob: float (0-1) — ML ensemble predicted win probability.
                  When provided, blends with historical win rate for smarter sizing.
+        emotion_state: Market fear/greed state used to modulate risk overlay.
         """
+        # ── Emotion Risk Overlay ─────────────────────────────────────────────
+        if emotion_state in ['FEAR', 'PANIC']:
+            if symbol in ['XAUUSD', 'XAUUSDm', 'USDCHF']:
+                # Safe havens thrive on fear, maintain standard size
+                pass
+            else:
+                # Risk-on assets face high volatility, reduce risk by 40%
+                scaling_factor *= 0.6
+        elif emotion_state in ['GREED', 'EUPHORIA']:
+            # Overextended market, fear of impending mean-reversion, reduce risk 20%
+            scaling_factor *= 0.8
+
         # ── Kelly Criterion ──────────────────────────────────────────────────
         kelly_risk_pct = None
         if getattr(settings, 'USE_KELLY', False):
@@ -502,21 +515,33 @@ class RiskManager:
         return 0.01
 
 
-    def monitor_positions(self, symbol, positions, current_tick, atr=None):
+    def monitor_positions(self, symbol, positions, current_tick, atr=None, df=None, emotion_state='NEUTRAL', emotion_score=0.5):
         """
-        Monitors open positions for exit conditions (Trailing Stop, BE, Partial).
-        Returns a list of actions to execute.
-        Action format: {'type': 'MODIFY'|'PARTIAL', 'ticket': int, ...}
+        Smart Exit System: Let winners run, cut losers fast.
         
-        atr: Average True Range (optional but recommended for dynamic trailing)
+        Uses progressive trailing SL (tightens as profit grows) instead of fixed TP.
+        Detects momentum reversals to cut losing trades early.
+        
+        Args:
+            symbol: Trading symbol
+            positions: List of MT5 positions
+            current_tick: Current tick data
+            atr: Current ATR value (required for smart exits)
+            df: DataFrame with technical features (optional, for momentum analysis)
+            emotion_state: Market emotion state for dynamic trailing adjustments
+        
+        Returns: List of actions: {'type': 'MODIFY'|'PARTIAL'|'CLOSE', ...}
         """
         actions = []
         if not positions or not current_tick:
             return actions
 
-        # Initialize tracking sets if not present
+        # Initialize tracking sets
         if not hasattr(self, 'breakeven_set'): self.breakeven_set = set()
         if not hasattr(self, 'partial_closed'): self.partial_closed = set()
+        if not hasattr(self, 'trail_high'): self.trail_high = {}  # {ticket: best_price_seen}
+
+        smart_exit = getattr(settings, 'SMART_EXIT_ENABLED', True)
 
         for pos in positions:
             entry_price = pos.price_open
@@ -524,72 +549,220 @@ class RiskManager:
             current_tp = pos.tp
             ticket = pos.ticket
 
-            if pos.type == mt5.ORDER_TYPE_BUY:
-                current_price = current_tick.bid
-                risk = entry_price - current_sl if current_sl > 0 else 0
+            is_buy = pos.type == mt5.ORDER_TYPE_BUY
+            current_price = current_tick.bid if is_buy else current_tick.ask
+            
+            # Calculate profit in price distance
+            if is_buy:
                 profit = current_price - entry_price
+                risk = entry_price - current_sl if current_sl > 0 else (atr or 0)
+            else:
+                profit = entry_price - current_price
+                risk = current_sl - entry_price if current_sl > 0 else (atr or 0)
 
-                # 1. Break-Even (Risk Free @ 1R)
-                if (risk > 0 and profit >= risk and ticket not in self.breakeven_set):
-                    be_sl = entry_price + (risk * 0.1) 
+            # Profit in ATR multiples (key metric for all decisions)
+            profit_atr = profit / atr if atr and atr > 0 else 0
+
+            if not smart_exit or not atr or atr <= 0:
+                # Fallback: simple trailing at 1.5x ATR
+                if atr and atr > 0 and profit > 0:
+                    self._apply_simple_trail(actions, pos, current_price, current_sl, current_tp, atr, is_buy, symbol)
+                continue
+
+            # ═══════════════════════════════════════════════════════════════
+            #  SMART EXIT LOGIC
+            # ═══════════════════════════════════════════════════════════════
+
+            # ── 1. EARLY LOSS CUTTING (momentum-based) ────────────────────
+            if getattr(settings, 'EARLY_CUT_ENABLED', True) and profit < 0:
+                cut_threshold = -getattr(settings, 'EARLY_CUT_LOSS_ATR', 0.5) * atr
+                
+                if profit < cut_threshold and df is not None and len(df) >= 14:
+                    should_cut, cut_reason = self._check_momentum_against(df, is_buy)
+                    if should_cut:
+                        actions.append({
+                            'type': 'CLOSE', 'ticket': ticket,
+                            'reason': f'Early Cut: {cut_reason} (loss: {profit_atr:.1f} ATR)'
+                        })
+                        continue  # Skip other actions for this position
+
+            # ── 2. BREAKEVEN (eliminate risk ASAP) ────────────────────────
+            be_activate = getattr(settings, 'BREAKEVEN_ACTIVATE_ATR', 0.5) * atr
+            be_buffer = getattr(settings, 'BREAKEVEN_BUFFER_ATR', 0.05) * atr
+            
+            if profit >= be_activate and ticket not in self.breakeven_set:
+                if is_buy:
+                    be_sl = entry_price + be_buffer
                     if be_sl > current_sl:
                         actions.append({
-                            'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even @ 1R'
+                            'type': 'MODIFY', 'ticket': ticket,
+                            'sl': be_sl, 'tp': current_tp,
+                            'reason': f'Breakeven (profit: {profit_atr:.1f} ATR)'
                         })
                         self.breakeven_set.add(ticket)
-
-                # 2. Partial Close (50% @ 1R)
-                if (risk > 0 and profit >= risk and ticket not in self.partial_closed):
-                    actions.append({
-                        'type': 'PARTIAL', 'ticket': ticket, 
-                        'fraction': 0.5, 'reason': 'Partial Profit (50% @ 1R)'
-                    })
-                    self.partial_closed.add(ticket)
-
-                # 3. Trailing Stop (1.5x ATR)
-                if entry_price > 0 and atr and atr > 0:
-                    proposed_sl = current_price - (1.5 * atr)
-                    if proposed_sl > current_sl:
-                        threshold = 0.0001 if "JPY" not in symbol else 0.01 
-                        if abs(proposed_sl - current_sl) > threshold:
-                            actions.append({
-                                'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': proposed_sl, 'tp': current_tp, 'reason': f"Trailing (1.5x ATR)"
-                            })
-
-            elif pos.type == mt5.ORDER_TYPE_SELL:
-                current_price = current_tick.ask
-                risk = current_sl - entry_price if current_sl > 0 else 0
-                profit = entry_price - current_price
-
-                # 1. Break-Even (@ 1R)
-                if (risk > 0 and profit >= risk and ticket not in self.breakeven_set):
-                    be_sl = entry_price - (risk * 0.1)
+                else:
+                    be_sl = entry_price - be_buffer
                     if be_sl < current_sl or current_sl == 0:
                         actions.append({
-                            'type': 'MODIFY', 'ticket': ticket, 
-                            'sl': be_sl, 'tp': current_tp, 'reason': 'Break-Even @ 1R'
+                            'type': 'MODIFY', 'ticket': ticket,
+                            'sl': be_sl, 'tp': current_tp,
+                            'reason': f'Breakeven (profit: {profit_atr:.1f} ATR)'
                         })
                         self.breakeven_set.add(ticket)
 
-                # 2. Partial Close (50% @ 1R)
-                if (risk > 0 and profit >= risk and ticket not in self.partial_closed):
-                    actions.append({
-                        'type': 'PARTIAL', 'ticket': ticket, 
-                        'fraction': 0.5, 'reason': 'Partial Profit (50% @ 1R)'
-                    })
-                    self.partial_closed.add(ticket)
+            # ── 3. PARTIAL CLOSE at BE (lock some profit risk-free) ───────
+            if (getattr(settings, 'PARTIAL_AT_BE', True) and 
+                profit >= be_activate and 
+                ticket not in self.partial_closed and
+                ticket in self.breakeven_set):
+                fraction = getattr(settings, 'PARTIAL_CLOSE_FRACTION', 0.30)
+                actions.append({
+                    'type': 'PARTIAL', 'ticket': ticket,
+                    'fraction': fraction,
+                    'reason': f'Partial {fraction*100:.0f}% at BE (risk-free)'
+                })
+                self.partial_closed.add(ticket)
 
-                # 3. Trailing Stop (1.5x ATR)
-                if entry_price > 0 and atr and atr > 0:
-                    proposed_sl = current_price + (1.5 * atr)
-                    if proposed_sl < current_sl or current_sl == 0:
-                        threshold = 0.0001 if "JPY" not in symbol else 0.01
+            # ── 4. PROGRESSIVE TRAILING SL (the core "let winners run") ───
+            trail_activate = getattr(settings, 'TRAIL_ACTIVATE_ATR', 0.3) * atr
+            
+            if profit >= trail_activate:
+                # Calculate dynamic trail distance based on profit level
+                trail_dist = self._calc_progressive_trail(profit_atr, atr)
+                
+                # Emotion Overlay: tighten trailing if market is extremely fearful/volatile
+                if emotion_state in ['FEAR', 'PANIC']:
+                    trail_dist *= 0.7  # 30% tighter to protect profits in high volatility
+                
+                # Track best price seen (for ratcheting)
+                if ticket not in self.trail_high:
+                    self.trail_high[ticket] = current_price
+                else:
+                    if is_buy:
+                        self.trail_high[ticket] = max(self.trail_high[ticket], current_price)
+                    else:
+                        self.trail_high[ticket] = min(self.trail_high[ticket], current_price)
+                
+                best_price = self.trail_high[ticket]
+                
+                # Calculate trailing SL from best price seen
+                if is_buy:
+                    proposed_sl = best_price - trail_dist
+                    # Ratchet: SL can only move UP
+                    if proposed_sl > current_sl:
+                        threshold = 0.01 if symbol in ['XAUUSD', 'XAUUSDm'] else 0.0001
                         if abs(proposed_sl - current_sl) > threshold:
                             actions.append({
-                                'type': 'MODIFY', 'ticket': ticket, 
-                                'sl': proposed_sl, 'tp': current_tp, 'reason': f"Trailing (1.5x ATR)"
+                                'type': 'MODIFY', 'ticket': ticket,
+                                'sl': proposed_sl, 'tp': current_tp,
+                                'reason': f'Trail SL ↑ (profit: {profit_atr:.1f} ATR, trail: {trail_dist/atr:.1f} ATR)'
+                            })
+                else:
+                    proposed_sl = best_price + trail_dist
+                    # Ratchet: SL can only move DOWN
+                    if proposed_sl < current_sl or current_sl == 0:
+                        threshold = 0.01 if symbol in ['XAUUSD', 'XAUUSDm'] else 0.0001
+                        if abs(proposed_sl - current_sl) > threshold:
+                            actions.append({
+                                'type': 'MODIFY', 'ticket': ticket,
+                                'sl': proposed_sl, 'tp': current_tp,
+                                'reason': f'Trail SL ↓ (profit: {profit_atr:.1f} ATR, trail: {trail_dist/atr:.1f} ATR)'
                             })
 
         return actions
+
+    def _calc_progressive_trail(self, profit_atr: float, atr: float) -> float:
+        """
+        Calculate trail distance that TIGHTENS as profit grows.
+        
+        Profit Level → Trail Distance:
+          0.3 ATR    → 1.0x ATR  (wide — give room to breathe)
+          1.0 ATR    → 0.8x ATR  (moderate)
+          2.0 ATR    → 0.6x ATR  (tighter)
+          3.0+ ATR   → 0.4x ATR  (tight — lock the gains)
+        """
+        initial = getattr(settings, 'TRAIL_INITIAL_ATR', 1.0)
+        tight = getattr(settings, 'TRAIL_TIGHT_ATR', 0.4)
+        
+        # Linear interpolation: from initial at 0.3 ATR to tight at 3.0 ATR
+        progress = min(1.0, max(0.0, (profit_atr - 0.3) / 2.7))
+        trail_multiplier = initial - (initial - tight) * progress
+        
+        return trail_multiplier * atr
+
+    def _check_momentum_against(self, df, is_buy: bool) -> tuple:
+        """
+        Check if momentum indicators confirm the move is against the position.
+        Returns (should_cut: bool, reason: str).
+        """
+        try:
+            last = df.iloc[-1]
+            rsi = last.get('rsi', 50)
+            macd_hist = last.get('macd_histogram', 0)
+            
+            rsi_threshold = getattr(settings, 'EARLY_CUT_RSI_THRESHOLD', 35.0)
+            macd_bars = getattr(settings, 'EARLY_CUT_MACD_BARS', 3)
+            
+            reasons = []
+            score = 0
+            
+            if is_buy:
+                # For longs: RSI dropping below threshold = bearish
+                if rsi < rsi_threshold:
+                    reasons.append(f"RSI bearish ({rsi:.0f})")
+                    score += 1
+                # MACD histogram negative for N bars
+                if 'macd_histogram' in df.columns and len(df) >= macd_bars:
+                    recent_macd = df['macd_histogram'].iloc[-macd_bars:]
+                    if all(m < 0 for m in recent_macd):
+                        reasons.append(f"MACD bearish ({macd_bars} bars)")
+                        score += 1
+                # Price below SMA20
+                if 'sma_20' in df.columns and last['close'] < last.get('sma_20', last['close']):
+                    reasons.append("Below SMA20")
+                    score += 1
+            else:
+                # For shorts: RSI rising above (100 - threshold) = bullish
+                if rsi > (100 - rsi_threshold):
+                    reasons.append(f"RSI bullish ({rsi:.0f})")
+                    score += 1
+                if 'macd_histogram' in df.columns and len(df) >= macd_bars:
+                    recent_macd = df['macd_histogram'].iloc[-macd_bars:]
+                    if all(m > 0 for m in recent_macd):
+                        reasons.append(f"MACD bullish ({macd_bars} bars)")
+                        score += 1
+                if 'sma_20' in df.columns and last['close'] > last.get('sma_20', last['close']):
+                    reasons.append("Above SMA20")
+                    score += 1
+            
+            # Need at least 2 confirming signals to cut
+            if score >= 2:
+                return True, " + ".join(reasons)
+            
+        except Exception:
+            pass
+        
+        return False, ""
+
+    def _apply_simple_trail(self, actions, pos, current_price, current_sl, current_tp, atr, is_buy, symbol):
+        """Fallback simple trailing stop when smart exit is disabled."""
+        if is_buy:
+            proposed_sl = current_price - (1.5 * atr)
+            if proposed_sl > current_sl:
+                threshold = 0.01 if 'XAU' in symbol else 0.0001
+                if abs(proposed_sl - current_sl) > threshold:
+                    actions.append({
+                        'type': 'MODIFY', 'ticket': pos.ticket,
+                        'sl': proposed_sl, 'tp': current_tp,
+                        'reason': 'Simple Trail (1.5x ATR)'
+                    })
+        else:
+            proposed_sl = current_price + (1.5 * atr)
+            if proposed_sl < current_sl or current_sl == 0:
+                threshold = 0.01 if 'XAU' in symbol else 0.0001
+                if abs(proposed_sl - current_sl) > threshold:
+                    actions.append({
+                        'type': 'MODIFY', 'ticket': pos.ticket,
+                        'sl': proposed_sl, 'tp': current_tp,
+                        'reason': 'Simple Trail (1.5x ATR)'
+                    })

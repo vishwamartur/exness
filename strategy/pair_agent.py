@@ -264,7 +264,13 @@ class PairAgent:
         spread_price = (tick.ask - tick.bid) if tick else 0.0
 
         sl_dist = atr * settings.ATR_SL_MULTIPLIER
-        tp_dist = atr * settings.ATR_TP_MULTIPLIER + spread_price  # net of spread cost
+        
+        # Smart Exit: use wide safety-net TP instead of fixed TP
+        # The real exit is via trailing SL — TP is just an emergency backstop
+        if getattr(settings, 'SMART_EXIT_ENABLED', False):
+            tp_dist = atr * getattr(settings, 'TP_SAFETY_ATR', 10.0)
+        else:
+            tp_dist = atr * settings.ATR_TP_MULTIPLIER + spread_price  # net of spread cost
 
         # Enforce minimum TP > 3x spread (ensures net profit is positive)
         min_tp_spread_ratio = getattr(settings, 'MIN_TP_SPREAD_RATIO', 3.0)
@@ -315,12 +321,17 @@ class PairAgent:
         
         # News Sentiment Analysis (Gemini AI-Powered)
         sentiment = 'NEUTRAL'  # Default before Gemini analysis
+        emotion_state = 'NEUTRAL'
+        emotion_score = 0.5
         try:
             from analysis.gemini_news_analyzer import get_gemini_analyzer
             gemini = get_gemini_analyzer()
             if gemini.is_available():
                 sentiment_data = await gemini.analyze(self.symbol)
+                self.latest_sentiment_data = sentiment_data  # Cache for active trade management
                 sentiment = sentiment_data.get('direction_bias', 'NEUTRAL')
+                emotion_state = sentiment_data.get('emotion_state', 'NEUTRAL')
+                emotion_score = sentiment_data.get('emotion_score', 0.5)
                 
                 # Check if Gemini strongly contradicts the trade direction
                 should_block, block_reason = gemini.should_block_trade(signal, sentiment_data)
@@ -398,6 +409,8 @@ class PairAgent:
             'pattern_analysis': pattern_analysis,
             'pattern_confidence': pattern_confidence,
             'sentiment': sentiment,
+            'emotion_state': emotion_state,
+            'emotion_score': emotion_score,
             'rag_context': rag_context,
             'rag_win_rate': rag_context.get('historical_win_rate', 0.5),
             'inst_flow_score': inst_flow.get('score', 0),
@@ -526,19 +539,41 @@ class PairAgent:
             except Exception:
                 pass
 
-        # 1. Standard Risk Actions
-        actions = self.risk_manager.monitor_positions(self.symbol, positions, tick, atr=atr)
+        # 1. Standard Risk Actions (now with smart exit support)
+        # Fetch data for momentum analysis if smart exit is enabled
+        df_for_exit = None
+        if getattr(settings, 'SMART_EXIT_ENABLED', False):
+            try:
+                from strategy import features
+                df_exit, trunc = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 200)
+                if df_exit is not None and not trunc:
+                    df_exit = features.add_technical_features(df_exit)
+                    df_for_exit = df_exit
+            except Exception:
+                pass
+        
+        # Pull cached emotion state for dynamic trailing stops
+        emotion_state = getattr(self, 'latest_sentiment_data', {}).get('emotion_state', 'NEUTRAL')
+        emotion_score = getattr(self, 'latest_sentiment_data', {}).get('emotion_score', 0.5)
+        
+        actions = self.risk_manager.monitor_positions(
+            self.symbol, positions, tick, atr=atr, df=df_for_exit,
+            emotion_state=emotion_state, emotion_score=emotion_score
+        )
         
         for act in actions:
             try:
-                if act['type'] == 'MODIFY':
+                if act['type'] == 'CLOSE':
+                    client.close_position(act['ticket'])
+                    print(f"[{self.symbol}] Smart Exit: {act['reason']} -> CLOSED")
+                elif act['type'] == 'MODIFY':
                     client.modify_position(act['ticket'], act['sl'], act['tp'])
-                    print(f"[{self.symbol}] Agent: {act['reason']} -> SL {act['sl']:.5f}")
+                    print(f"[{self.symbol}] Smart Exit: {act['reason']} -> SL {act['sl']:.2f}")
                 elif act['type'] == 'PARTIAL':
                     client.partial_close(act['ticket'], act['fraction'])
-                    print(f"[{self.symbol}] Agent: {act['reason']} -> Partial Close")
+                    print(f"[{self.symbol}] Smart Exit: {act['reason']} -> Partial Close")
             except Exception as e:
-                logger.error(f"[{self.symbol}] Management Action Failed: {e}")
+                logger.error(f"[{self.symbol}] Smart Exit Action Failed: {e}")
 
         # 2. Agent Intelligence (Regime Guard)
         # If we are holding a LONG but regime turns BEARISH_TREND, exit?

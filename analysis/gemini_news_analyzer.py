@@ -117,6 +117,8 @@ You MUST respond in EXACTLY this JSON format, nothing else:
     "sentiment_score": <float from -1.0 (extremely bearish) to +1.0 (extremely bullish) for {symbol}>,
     "confidence": <float from 0.0 to 1.0 indicating how certain you are>,
     "direction_bias": "<BULLISH or BEARISH or NEUTRAL>",
+    "emotion_state": "<PANIC or FEAR or NEUTRAL or GREED or EUPHORIA>",
+    "emotion_score": <float from 0.0 (extreme panic/fear) to 1.0 (extreme greed/euphoria), 0.5 is neutral>,
     "key_events": ["<event1>", "<event2>", "<event3>"],
     "risk_level": "<LOW or MEDIUM or HIGH>",
     "reasoning": "<1-2 sentence summary of why>"
@@ -124,6 +126,7 @@ You MUST respond in EXACTLY this JSON format, nothing else:
 
 IMPORTANT RULES:
 - Score should reflect bias for BUYING {symbol} (positive = bullish for base currency)
+- Set emotion_state to reflect the current psychological state of the broader market (e.g. Gold often rises in FEAR or PANIC)
 - Be conservative with confidence unless there is CLEAR directional evidence
 - If no major news, return neutral with low confidence
 - Focus on events from the last 24 hours
@@ -155,11 +158,14 @@ IMPORTANT RULES:
             # Validate and clamp values
             score = max(-1.0, min(1.0, float(data.get("sentiment_score", 0))))
             confidence = max(0.0, min(1.0, float(data.get("confidence", 0.3))))
+            emotion_score = max(0.0, min(1.0, float(data.get("emotion_score", 0.5))))
 
             result = {
                 "score": round(score, 3),
                 "confidence": round(confidence, 3),
                 "direction_bias": data.get("direction_bias", "NEUTRAL"),
+                "emotion_state": data.get("emotion_state", "NEUTRAL"),
+                "emotion_score": round(emotion_score, 3),
                 "key_events": data.get("key_events", [])[:5],
                 "risk_level": data.get("risk_level", "MEDIUM"),
                 "reasoning": data.get("reasoning", ""),
@@ -169,6 +175,7 @@ IMPORTANT RULES:
             }
 
             print(f"[GEMINI] {symbol}: {result['direction_bias']} ({result['score']:+.2f}) "
+                  f"| Emotion: {result['emotion_state']} ({result['emotion_score']:.2f}) "
                   f"| Conf: {result['confidence']:.0%} | {result['reasoning'][:80]}")
 
             return result
@@ -182,6 +189,8 @@ IMPORTANT RULES:
             "score": 0.0,
             "confidence": 0.1,
             "direction_bias": "NEUTRAL",
+            "emotion_state": "NEUTRAL",
+            "emotion_score": 0.5,
             "key_events": [],
             "risk_level": "MEDIUM",
             "reasoning": reason or "No data available",
