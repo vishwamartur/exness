@@ -116,14 +116,58 @@ class PairAgent:
         # 4. Success
         return candidate, f"CANDIDATE ({candidate['direction']})"
 
+    @staticmethod
+    def _spread_to_pips(symbol: str, ask: float, bid: float) -> float:
+        """
+        Convert raw ask-bid spread to pips, mirroring RiskManager's logic:
+            spread_points = (ask - bid) / point
+            spread_pips   = spread_points / 10.0   (1 pip == 10 points)
+        Falls back to dividing by 0.00001 (5-decimal forex) when symbol_info
+        is unavailable, then divides by 10 the same way.
+        """
+        sym_info = mt5.symbol_info(symbol)
+        point = sym_info.point if sym_info and sym_info.point > 0 else 0.00001
+        spread_points = (ask - bid) / point
+        return spread_points / 10.0
+
+    def _check_spread(self) -> Tuple[bool, str]:
+        """
+        Check if current spread is acceptable for this symbol.
+        Uses the same points→pips conversion as RiskManager to prevent
+        overly strict blocking caused by comparing raw points to pip thresholds.
+        Returns (ok, reason_string).
+        """
+        try:
+            tick = mt5.symbol_info_tick(self.symbol)
+            if not tick:
+                return True, ""  # Can't check — fail open
+
+            if (tick.ask - tick.bid) <= 0:
+                return True, ""
+
+            spread_pips = self._spread_to_pips(self.symbol, tick.ask, tick.bid)
+
+            if self.symbol in getattr(settings, 'SYMBOLS_CRYPTO', []):
+                max_spread = getattr(settings, 'MAX_SPREAD_PIPS_CRYPTO', 20000.0)
+            elif self.symbol in getattr(settings, 'SYMBOLS_COMMODITIES', []):
+                max_spread = getattr(settings, 'MAX_SPREAD_PIPS_COMMODITY', 150.0)
+            else:
+                max_spread = getattr(settings, 'MAX_SPREAD_PIPS', 3.0)
+
+            if spread_pips > max_spread:
+                return False, f"Spread too wide ({spread_pips:.1f} > {max_spread:.1f} pips)"
+
+            return True, ""
+        except Exception:
+            return True, ""  # Fail open — don't block on errors
+
     async def _fetch_data(self) -> Tuple[Optional[Dict[str, Any]], str]:
         try:
-            # Check spread first (optimization)
-            # We can't easily check spread without MT5 connection content, but loader usually assumes connection.
-            # InstitutionalStrategy had _check_spread logic. We'll rely on RiskManager for now or add it here?
-            # Let's add simple spread check if possible, or assume caller handles it.
-            # Ideally PairAgent is autonomous.
-            
+            # Check spread first (reject if too wide)
+            spread_ok, spread_reason = self._check_spread()
+            if not spread_ok:
+                return None, spread_reason
+
             # Fetch Primary Data
             df, primary_truncated = await run_in_executor(loader.get_historical_data, self.symbol, self.timeframe, 2000)
             
@@ -201,10 +245,28 @@ class PairAgent:
         # 5. Construct Candidate using ML or BOS
         # Filter: Minimum Score
         score = q_res.get('score', 0)
-        
-        # Basic Filter
-        if score < settings.MIN_CONFLUENCE_SCORE:
-            return None, f"Low Score ({score})"
+
+        # --- Regime-adaptive parameters (must happen BEFORE score filter) ---
+        # Determine regime and pick dynamic thresholds from REGIME_PARAMS
+        _regime_params = getattr(settings, 'REGIME_PARAMS', {})
+        # Map the session-level regime string to the REGIME_PARAMS keys
+        _regime_key = "RANGING"  # safe default
+        if self.regime in ("TRENDING", "BULL_TREND", "BEAR_TREND"):
+            _regime_key = "TRENDING"
+        elif self.regime in ("VOLATILE", "VOLATILE_HIGH"):
+            _regime_key = "VOLATILE"
+        elif self.regime in ("RANGING", "NEUTRAL", "UNKNOWN"):
+            _regime_key = "RANGING"
+
+        _rp = _regime_params.get(_regime_key, {})
+        min_confluence = int(_rp.get('MIN_CONFLUENCE_SCORE', settings.MIN_CONFLUENCE_SCORE))
+        # Store resolved regime key for downstream use
+        self._regime_key = _regime_key
+        self._regime_rp = _rp
+
+        # Basic Filter (now uses regime-adaptive min_confluence)
+        if score < min_confluence:
+            return None, f"Low Score ({score} < {min_confluence} for {_regime_key} regime)"
             
         # Sureshot Mode Filter (Only boost, don't block if > MIN)
         # if score < settings.SURESHOT_MIN_SCORE:
@@ -236,6 +298,26 @@ class PairAgent:
         regime_detector = self.analyst.get_regime_detector(self.symbol)
         regime_type, regime_details = regime_detector.get_regime(df_scan)
         
+        # ── Regime-Adaptive Parameters ──────────────────────────────────
+        # Map detailed regime types to the three param buckets
+        if getattr(settings, 'USE_HMM_REGIME', False):
+            regime_params = getattr(settings, 'REGIME_PARAMS', {})
+            if 'TRENDING' in regime_type or 'BREAKOUT' in regime_type:
+                r_key = 'TRENDING'
+            elif 'VOLATILE' in regime_type:
+                r_key = 'VOLATILE'
+            else:
+                r_key = 'RANGING'
+            rp = regime_params.get(r_key, {})
+            # Override settings for this scan cycle (local vars used below)
+            atr_tp_mult = rp.get('ATR_TP_MULTIPLIER', settings.ATR_TP_MULTIPLIER)
+            atr_sl_mult = rp.get('ATR_SL_MULTIPLIER', settings.ATR_SL_MULTIPLIER)
+            max_daily = rp.get('MAX_DAILY_TRADES', settings.MAX_DAILY_TRADES)
+        else:
+            atr_tp_mult = settings.ATR_TP_MULTIPLIER
+            atr_sl_mult = settings.ATR_SL_MULTIPLIER
+            max_daily = settings.MAX_DAILY_TRADES
+
         # Skip trades in bad regimes (RANGING, VOLATILE_HIGH)
         if not regime_detector.is_tradeable_regime(regime_type):
             return None, f"Bad Regime: {regime_type} - Skip trading"
@@ -575,6 +657,19 @@ class PairAgent:
             except Exception as e:
                 logger.error(f"[{self.symbol}] Smart Exit Action Failed: {e}")
 
+        # 1.5. ATR Trailing Stop
+        if getattr(settings, 'USE_TRAILING_STOP', False) and atr > 0:
+            for pos in positions:
+                try:
+                    modified = client.update_trailing_stop(
+                        pos.ticket, atr,
+                        multiplier=getattr(settings, 'TRAILING_ATR_MULTIPLIER', 1.5)
+                    )
+                    if modified:
+                        print(f"[{self.symbol}] Trailing Stop updated for #{pos.ticket}")
+                except Exception as e:
+                    logger.error(f"[{self.symbol}] Trailing Stop Error: {e}")
+
         # 2. Agent Intelligence (Regime Guard)
         # If we are holding a LONG but regime turns BEARISH_TREND, exit?
         # Only if we have a valid regime from recent analysis
@@ -629,11 +724,11 @@ class PairAgent:
         1. Spread / SL Ratio check
         2. Hunting Hours check
         """
-        # 1. Spread Check
+        # 1. Spread Check (uses shared _spread_to_pips for consistent pip conversion)
         tick = mt5.symbol_info_tick(self.symbol)
         if tick:
-            spread_pips = (tick.ask - tick.bid)
-            # Assuming SL distance is in price units
+            spread_pips = self._spread_to_pips(self.symbol, tick.ask, tick.bid)
+            # SL distance is in price units; ratio must be in the same unit space
             sl_dist = candidate['sl_distance']
             
             if sl_dist > 0:

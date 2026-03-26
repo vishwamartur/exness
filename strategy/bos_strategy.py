@@ -22,6 +22,10 @@ class BOSStrategy:
         self.min_atr_multiplier = getattr(settings, 'BOS_MOMENTUM_MULTIPLIER', 1.5)
         self.sweep_lookback = getattr(settings, 'BOS_SWEEP_LOOKBACK', 20)
         self.swing_lookback = 5 # Standard fractal lookback
+        self.require_confirmation = getattr(settings, 'BOS_REQUIRE_CONFIRMATION', True)
+        self.min_pullback_pct = getattr(settings, 'BOS_MIN_PULLBACK_PCT', 0.3)
+        # Pending signals awaiting confirmation candle: {symbol: signal_dict}
+        self.pending_signals = {}
 
     def analyze(self, df: pd.DataFrame) -> dict:
         """
@@ -150,15 +154,77 @@ class BOSStrategy:
              else:
                 sweep_details = "Huge Momentum (Sweep Override)"
 
-        return {
+        result = {
             'signal': bos_signal,
             'valid': True,
             'price': candle['close'],
             'sl': df['low'].iloc[current_idx] if bos_signal == 'BUY' else df['high'].iloc[current_idx], # SL below breakout candle
             'atr': atr,
             'reason': f"BOS + Momentum + {sweep_details}",
-            'score': 10 # High quality setup
+            'score': 10, # High quality setup
+            'break_candle_range': candle_range,
+            'swing_level': swing_level,
         }
+
+        # If confirmation is required, store as pending and return empty
+        if self.require_confirmation:
+            # Use a generic key; caller can use confirm_signal(symbol, df) per symbol
+            result['pending'] = True
+            return result
+
+        return result
+
+    def store_pending(self, symbol, signal):
+        """Store a pending BOS signal awaiting confirmation."""
+        self.pending_signals[symbol] = signal
+
+    def confirm_signal(self, symbol, df):
+        """
+        Check if the latest candle confirms a pending BOS signal.
+        Confirmation requires:
+          1. Close holds beyond the broken swing level
+          2. Pullback >= BOS_MIN_PULLBACK_PCT * break_candle_range
+
+        Returns the confirmed signal dict (with 'pending' removed) or empty dict.
+        """
+        if symbol not in self.pending_signals:
+            return {}
+
+        pending = self.pending_signals[symbol]
+        if df is None or len(df) < 2:
+            return {}
+
+        candle = df.iloc[-1]
+        swing_level = pending.get('swing_level', 0)
+        break_range = pending.get('break_candle_range', 0)
+
+        if break_range <= 0:
+            del self.pending_signals[symbol]
+            return {}
+
+        confirmed = False
+        if pending['signal'] == 'BUY':
+            # Close must still be above broken swing high
+            holds = candle['close'] > swing_level
+            # Pullback: candle low dipped toward the break level
+            pullback = pending['price'] - candle['low']
+            has_pullback = pullback >= (break_range * self.min_pullback_pct)
+            confirmed = holds and has_pullback
+        elif pending['signal'] == 'SELL':
+            holds = candle['close'] < swing_level
+            pullback = candle['high'] - pending['price']
+            has_pullback = pullback >= (break_range * self.min_pullback_pct)
+            confirmed = holds and has_pullback
+
+        if confirmed:
+            result = dict(pending)
+            result.pop('pending', None)
+            result['reason'] = result.get('reason', '') + ' + Confirmed'
+            del self.pending_signals[symbol]
+            return result
+
+        # Signal still pending — could expire after N bars (keep simple for now)
+        return {}
 
     def _add_swing_points(self, df, lookback=5):
         # Rolling Max/Min for Swing High/Low
