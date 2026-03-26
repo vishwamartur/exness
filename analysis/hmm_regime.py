@@ -23,6 +23,10 @@ from typing import Tuple, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Suppress hmmlearn convergence warnings which spam the console
+logging.getLogger("hmmlearn").setLevel(logging.ERROR)
+logging.getLogger("hmmlearn.base").setLevel(logging.ERROR)
+
 try:
     from hmmlearn.hmm import GaussianHMM
     HMM_AVAILABLE = True
