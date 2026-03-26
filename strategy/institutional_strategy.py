@@ -29,11 +29,6 @@ from utils.data_cache import DataCache
 from utils.trade_journal import TradeJournal
 from utils.risk_manager import RiskManager
 from utils.news_filter import is_news_blackout, get_active_events
-<<<<<<< HEAD
-=======
-from utils.correlation_filter import check_correlation_conflict
-from utils.adaptive_position_manager import AdaptivePositionManager
->>>>>>> 6e308ac63dc5383a4cc75517e43aeed1cceab883
 from utils.pre_trade_analyzer import PreTradeAnalyzer
 from analysis.market_analyst import MarketAnalyst
 from analysis.quant_agent import QuantAgent
