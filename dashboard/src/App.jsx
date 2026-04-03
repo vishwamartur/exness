@@ -81,6 +81,18 @@ export default function App() {
                         >
                             Trading Journal
                         </button>
+                        <button
+                            onClick={() => setActiveTab('mirofish')}
+                            style={{
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                fontSize: 13, fontWeight: 600, paddingBottom: 6,
+                                color: activeTab === 'mirofish' ? 'var(--blue)' : 'var(--text-secondary)',
+                                borderBottom: activeTab === 'mirofish' ? '2px solid var(--blue)' : '2px solid transparent',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            MiroFish Swarm AI
+                        </button>
                     </div>
                 </div>
 
@@ -134,9 +146,17 @@ export default function App() {
                         <TradeFeed recentTrades={state.recentTrades} />
                     </div>
                 </>
-            ) : (
+            ) : activeTab === 'journal' ? (
                 <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'hidden' }}>
                     <TradingJournal />
+                </div>
+            ) : (
+                <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'hidden', background: '#fff', borderRadius: 'var(--radius-lg)' }}>
+                    <iframe 
+                        src="http://localhost:3000" 
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                        title="MiroFish Dashboard"
+                    />
                 </div>
             )}
         </div>
