@@ -60,6 +60,21 @@ async def main():
     else:
         print("[DASHBOARD] dashboard/ folder not found — run 'cd dashboard && npm install' first")
 
+    # 1.95 Launch MiroFish Swarm AI
+    mirofish_dir = pathlib.Path(__file__).parent / "mirofish"
+    if mirofish_dir.exists():
+        try:
+            subprocess.Popen(
+                "npm run dev",
+                cwd=str(mirofish_dir),
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("[MIROFISH] Swarm AI starting at http://localhost:3000")
+        except Exception as e:
+            print(f"[MIROFISH] Could not launch MiroFish: {e}")
+
     # 2. Initialize Strategy & Stat Arb Engine
     try:
         strategy = InstitutionalStrategy(client, on_event=push_update)

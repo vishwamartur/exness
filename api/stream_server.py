@@ -199,6 +199,24 @@ def get_historical_trades(limit: int = 50):
         for r in rows
     ]
 
+@app.get("/api/quote")
+def get_quote(symbol: str = "XAUUSDm"):
+    """Live quote for synthetic orderbook."""
+    try:
+        import MetaTrader5 as mt5
+        tick = mt5.symbol_info_tick(symbol)
+        if tick:
+            return {
+                "symbol": symbol,
+                "bid": tick.bid,
+                "ask": tick.ask,
+                "time": tick.time
+            }
+    except Exception:
+        pass
+    # Basic fallback if mt5 fails or symbol not found
+    return {"symbol": symbol, "bid": 2345.50, "ask": 2345.80, "time": 0}
+
 # ─── Server Startup ───────────────────────────────────────────────────────────
 _loop = None
 

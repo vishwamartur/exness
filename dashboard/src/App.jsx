@@ -7,6 +7,7 @@ import TradeFeed from './components/TradeFeed'
 import EventLog from './components/EventLog'
 import ForexSessionClocks from './components/ForexSessionClocks'
 import TradingJournal from './components/TradingJournal'
+import OrderBook from './components/OrderBook'
 
 const VERSION = '2.2'
 
@@ -131,9 +132,14 @@ export default function App() {
                         <ScannerGrid scanSummary={state.scanSummary} lastScan={state.lastScan} />
                     </div>
 
-                    {/* ── Event Log (right column, spans 2 rows) ── */}
-                    <div style={{ gridColumn: 3, gridRow: '3 / 5', overflow: 'hidden' }}>
+                    {/* ── Event Log (right column, top half) ── */}
+                    <div style={{ gridColumn: 3, gridRow: 3, overflow: 'hidden' }}>
                         <EventLog events={state.events} />
+                    </div>
+
+                    {/* ── OrderBook (right column, bottom half) ── */}
+                    <div style={{ gridColumn: 3, gridRow: 4, overflow: 'hidden' }}>
+                        <OrderBook symbol="XAUUSDm" />
                     </div>
 
                     {/* ── Open Positions ── */}
