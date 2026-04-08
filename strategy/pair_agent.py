@@ -88,20 +88,21 @@ class PairAgent:
         if not self.is_active:
             return None, "Inactive (Circuit Breaker)"
 
-        # 0. News Filter
-        if getattr(settings, 'NEWS_FILTER_ENABLE', False):
+        # 0. News Filter (Bypassed if testing)
+        if getattr(settings, 'NEWS_FILTER_ENABLE', False) and not getattr(settings, 'FORCE_TEST_TRADES', False):
             is_blackout, event_name = is_news_blackout(self.symbol)
             if is_blackout:
                 return None, f"News Blackout ({event_name})"
 
-        # 1. Pre-Scan Risk Check
-        # Check cooldown
-        if self.last_trade_time > 0 and (projected_time_now() - self.last_trade_time < settings.COOLDOWN_SECONDS):
-             return None, "Cooldown"
-             
-        allowed, reason = self.risk_manager.check_pre_scan(self.symbol)
-        if not allowed:
-            return None, f"Risk Block: {reason}"
+        # 1. Pre-Scan Risk Check (Bypassed if testing)
+        if not getattr(settings, 'FORCE_TEST_TRADES', False):
+            # Check cooldown
+            if self.last_trade_time > 0 and (projected_time_now() - self.last_trade_time < settings.COOLDOWN_SECONDS):
+                 return None, "Cooldown"
+                 
+            allowed, reason = self.risk_manager.check_pre_scan(self.symbol)
+            if not allowed:
+                return None, f"Risk Block: {reason}"
 
         # 2. Fetch Data
         data, error = await self._fetch_data()
@@ -202,6 +203,30 @@ class PairAgent:
             return None, f"Fetch Error: {str(e)}"
 
     async def _analyze(self, data_dict: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], str]:
+        # -- FORCED TESTING --
+        if getattr(settings, 'FORCE_TEST_TRADES', False):
+            try:
+                sym_info = mt5.symbol_info(self.symbol)
+                point = sym_info.point if sym_info else 0.01
+            except:
+                point = 0.01
+            
+            return {
+                'symbol': self.symbol,
+                'direction': 'BUY',
+                'score': 10,
+                'entry_price': 0,
+                'entry_type': 'MARKET',
+                'ensemble_score': 10,
+                'ml_prob': 1.0,
+                'regime': 'TRENDING',
+                'sl_distance': point * 200, # Realistic SL spread distance
+                'tp_distance': point * 400,
+                'scaling_factor': 1.0,
+                'details': {'FORCED': 'Test mode active'},
+                'attributes': data_dict
+            }, "FORCED TRADE"
+
         # 1. Quant Analysis
         q_res = await run_in_executor(self.quant.analyze, self.symbol, data_dict)
         if not q_res:
@@ -217,6 +242,7 @@ class PairAgent:
         if getattr(settings, 'INST_FLOW_ENABLE', False):
             inst_flow = self.flow_detector.analyze(self.symbol, data_dict)
             print(f"[{self.symbol}] Inst Flow: score={inst_flow['score']}, dir={inst_flow['direction']}")
+
 
         # 2. Market Regime Analysis
         # Use DF with features from QuantAgent

@@ -399,6 +399,17 @@ class InstitutionalStrategy:
             cmd = mt5.ORDER_TYPE_SELL 
             price = limit_price
             
+        if getattr(settings, 'FORCE_TEST_TRADES', False):
+            limit_price = None # Use MARKET order to avoid stop-level rejection
+            if direction == 'BUY':
+                 price = tick.ask
+                 sl = price - sl_dist
+                 tp = price + tp_dist
+            else:
+                 price = tick.bid
+                 sl = price + sl_dist
+                 tp = price - tp_dist
+            
         print(f"[{symbol}] PENDING LIMIT {direction} @ {price:.5f} | Lot: {lot} | SL: {sl:.5f} | TP: {tp:.5f} | E: {exp_minutes}m")
         
         res = self.client.place_order(cmd, symbol, lot, sl, tp, limit_price=limit_price, expiration=expiration_ts)

@@ -68,6 +68,7 @@ DEVIATION = int(os.getenv("DEVIATION", 30))     # Wider deviation for Gold volat
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
 # ─── Institutional Risk Management ───────────────────────────────────────
+FORCE_TEST_TRADES = True                                   # <--- FORCED TEST MODE
 RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))       # 1% risk per scalp (XAUUSD focus)
 MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 2.0))  # 2% max for A+ Gold setups
 
@@ -76,9 +77,9 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 0.8))  # 0.8x ATR — t
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.0))  # 2.0x ATR — 1:2.5 R:R target
 
 # Confluence Gating — relaxed for more trade opportunities
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # Relaxed: 2 modules agree
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 1))  # Relaxed: 2 modules agree
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 4))     # Sureshot at 4
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.52))   # Relaxed: >52% ML edge is enough
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.40))   # Relaxed: >40% ML edge is enough
 MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.2)) # 1:1.2 minimum R:R
 
 # ─── Kelly Criterion Position Sizing ─────────────────────────────────────
@@ -222,19 +223,19 @@ REGIME_PARAMS = {
     "TRENDING": {
         "ATR_TP_MULTIPLIER": 5.0,
         "ATR_SL_MULTIPLIER": 1.8,
-        "MIN_CONFLUENCE_SCORE": 3,
+        "MIN_CONFLUENCE_SCORE": 1,
         "MAX_DAILY_TRADES": 4,
     },
     "RANGING": {
         "ATR_TP_MULTIPLIER": 2.5,
         "ATR_SL_MULTIPLIER": 1.5,
-        "MIN_CONFLUENCE_SCORE": 5,
+        "MIN_CONFLUENCE_SCORE": 1,
         "MAX_DAILY_TRADES": 2,
     },
     "VOLATILE": {
         "ATR_TP_MULTIPLIER": 3.0,
         "ATR_SL_MULTIPLIER": 2.5,
-        "MIN_CONFLUENCE_SCORE": 5,
+        "MIN_CONFLUENCE_SCORE": 1,
         "MAX_DAILY_TRADES": 1,
     },
 }

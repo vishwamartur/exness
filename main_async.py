@@ -1,160 +1,182 @@
+"""
+MT5 Trading Bot — Event-Driven Architecture (v3.0)
+
+All services communicate through an async EventBus.
+No service calls another service directly.
+
+Event Flow:
+  SCAN_START → MARKET_DATA_READY → QUANT_SIGNAL → TRADE_CANDIDATE
+  → TRADE_APPROVED → TRADE_EXECUTED → (Journal, Telegram, Dashboard)
+"""
 
 import asyncio
 import os
 import sys
+import logging
 import traceback
 from datetime import datetime
 
-# Reconfigure stdout for utf-8 (Windows fix)
+# Windows stdout fix
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 # Add project root to path
 sys.path.append(os.path.dirname(__file__))
 
+# ─── Logging Setup ────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)-20s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("Main")
+
+# ─── Imports ──────────────────────────────────────────────────────────────
 from config import settings
-from execution.mt5_client import MT5Client
-from strategy.institutional_strategy import InstitutionalStrategy
-from api.stream_server import start_server, push_update
+from core.event_bus import EventBus
+from core.mt5_gateway import MT5Gateway
+
+from services.market_data_service import MarketDataService
+from services.quant_service import QuantService
+from services.regime_service import RegimeService
+from services.sentiment_service import SentimentService
+from services.risk_service import RiskService
+from services.execution_service import ExecutionService
+from services.trade_manager_service import TradeManagerService
+from services.broadcast_service import BroadcastService
+from services.telegram_service import TelegramService
+from services.journal_service import JournalService
+from services.coordinator import CoordinatorService
+
+from services.strategy_service import StrategyService
+from services.flow_service import FlowService
+from services.performance_service import PerformanceService
+
 
 async def main():
-    print(f"=== INSTITUTIONAL STRATEGY v2.2 (Async) ===")
-    print(f"Start Time: {datetime.now()}")
-    
-    # 1. Initialize MT5
-    client = MT5Client()
-    if not client.connect():
+    print("=" * 60)
+    print("  MT5 EVENT-DRIVEN ARCHITECTURE v3.0")
+    print(f"  Start Time: {datetime.now()}")
+    print("=" * 60)
+
+    # ── 1. Core Infrastructure ────────────────────────────────────────
+    event_log_dir = os.path.join(os.path.dirname(__file__), "event_logs")
+    bus = EventBus(log_dir=event_log_dir)
+    gateway = MT5Gateway()
+
+    # ── 2. Connect to MT5 ─────────────────────────────────────────────
+    if not await gateway.connect():
         print("Failed to connect to MT5. Exiting.")
         return
 
-    # 1.5 Detect Symbols
-    if not client.detect_available_symbols():
+    if not await gateway.detect_available_symbols():
         print("Failed to detect symbols. Exiting.")
         return
 
-    # 1.8 Start Stream Server
-    try:
-        port = start_server()
-    except Exception as e:
-        print(f"Failed to start stream server: {e}")
-        port = 8000
+    print(f"\n[SYSTEM] Trading {len(settings.SYMBOLS)} symbols: "
+          f"{', '.join(settings.SYMBOLS[:5])}{'...' if len(settings.SYMBOLS) > 5 else ''}")
 
-    # 1.9 Launch React Dashboard
-    import subprocess, webbrowser, pathlib
+    # ── 3. Launch Dashboard ───────────────────────────────────────────
+    import subprocess, pathlib, webbrowser
     dashboard_dir = pathlib.Path(__file__).parent / "dashboard"
     if dashboard_dir.exists():
         try:
             subprocess.Popen(
                 "npm run dev",
                 cwd=str(dashboard_dir),
-                shell=True,                          # Required on Windows (npm is npm.cmd)
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print("[DASHBOARD] Vite dev server starting at http://localhost:5173")
-            await asyncio.sleep(3)   # let Vite warm up
-            webbrowser.open("http://localhost:5173")
-            print("[DASHBOARD] Opened in browser ✓")
-        except Exception as e:
-            print(f"[DASHBOARD] Could not launch dashboard: {e}")
-    else:
-        print("[DASHBOARD] dashboard/ folder not found — run 'cd dashboard && npm install' first")
-
-    # 1.95 Launch MiroFish Swarm AI
-    mirofish_dir = pathlib.Path(__file__).parent / "mirofish"
-    if mirofish_dir.exists():
-        try:
-            subprocess.Popen(
-                "npm run dev",
-                cwd=str(mirofish_dir),
                 shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            print("[MIROFISH] Swarm AI starting at http://localhost:3000")
+            print("[DASHBOARD] Vite dev server starting at http://localhost:5173")
+            await asyncio.sleep(3)
+            webbrowser.open("http://localhost:5173")
         except Exception as e:
-            print(f"[MIROFISH] Could not launch MiroFish: {e}")
+            print(f"[DASHBOARD] Could not launch: {e}")
 
-    # 2. Initialize Strategy & Stat Arb Engine
-    try:
-        strategy = InstitutionalStrategy(client, on_event=push_update)
-        
-        from analysis.stat_arb_manager import StatArbManager
-        stat_arb = StatArbManager(client)
-        
-        print("Agents & Stat-Arb Initialized.")
-    except Exception as e:
-        print(f"Failed to init strategy: {e}")
-        traceback.print_exc()
-        return
+    # ── 4. Create Services ────────────────────────────────────────────
+    # Shared RiskManager instance (services that need it share state)
+    from execution.mt5_client import MT5Client
+    from utils.risk_manager import RiskManager
+    mt5_client = MT5Client()
+    risk_manager = RiskManager(mt5_client)
 
-    # 3. Main Loop
-    print(f"entering main loop... (Interval: {settings.COOLDOWN_SECONDS}s)")
-    
+    services = [
+        # Data layer
+        MarketDataService(bus, gateway),
+
+        # Analysis layer
+        QuantService(bus),
+        RegimeService(bus),
+        SentimentService(bus),
+        StrategyService(bus),
+        FlowService(bus),
+
+        # Decision layer
+        RiskService(bus, gateway, risk_manager=risk_manager),
+        PerformanceService(bus),
+
+        # Execution layer
+        ExecutionService(bus, gateway),
+        TradeManagerService(bus, gateway, risk_manager=risk_manager),
+
+        # Output layer
+        BroadcastService(bus),
+        TelegramService(bus),
+        JournalService(bus),
+
+        # Orchestrator (must be last — triggers SCAN_START)
+        CoordinatorService(bus, gateway),
+    ]
+
+    # ── 5. Start EventBus ─────────────────────────────────────────────
+    await bus.start()
+
+    # ── 6. Start All Services ─────────────────────────────────────────
+    print(f"\n[SYSTEM] Starting {len(services)} services...")
+    for svc in services:
+        try:
+            await svc.start()
+        except Exception as e:
+            logger.error(f"Failed to start {svc.name}: {e}")
+            traceback.print_exc()
+
+    print(f"\n{'='*60}")
+    print(f"  ALL SERVICES RUNNING — {len(services)} active")
+    print(f"  EventBus: subscribers={bus.subscriber_count}")
+    print(f"  Interval: {settings.COOLDOWN_SECONDS}s")
+    print(f"{'='*60}\n")
+
+    # ── 7. Run Until Interrupted ──────────────────────────────────────
     try:
+        # The CoordinatorService._run_loop() drives the scan cycles
+        # We just need to keep the main coroutine alive
         while True:
-            start_time = asyncio.get_running_loop().time()
-            
-            try:
-                await strategy.run_scan_loop()
-                
-                # --- STATISTICAL ARBITRAGE (Pairs Trading) ---
-                print(f"[STAT-ARB] Evaluating {len(settings.STAT_ARB_PAIRS)} Cointegrated Hedging Pairs...")
-                for symbol_A, symbol_B in settings.STAT_ARB_PAIRS:
-                    # 1. Fetch minimum rolling 100 bars for OLS regression math
-                    # Use H1 timeframe for arb to filter out microstructure noise and focus on macro divergence
-                    from market_data import loader
-                    df_A, truncated_a = loader.get_historical_data(symbol_A, "H1", 200)
-                    df_B, truncated_b = loader.get_historical_data(symbol_B, "H1", 200)
-                    
-                    # Skip this pair if data was truncated (broker history limit)
-                    if truncated_a or truncated_b:
-                        continue
-                    
-                    # 2. Analyze Pair
-                    # Generates a Signal if Z-Score drifts beyond +-2 standard deviations
-                    signal = stat_arb.analyze_pair(symbol_A, symbol_B, df_A, df_B)
-                    
-                    if signal:
-                        action = signal.get("action")
-                        
-                        if action == "OPEN_SPREAD":
-                            stat_arb.execute_spread_trade(
-                                symbol_A, symbol_B, 
-                                signal["direction_A"], signal["direction_B"], 
-                                signal["hedge_ratio"]
-                            )
-                            # Alert UI
-                            push_update({
-                                "type": "STAT_ARB_HEDGE",
-                                "symbol": f"{symbol_A}/{symbol_B}",
-                                "message": f"Deploying Z={signal['z_score']:.2f} Delta-Neutral Spread"
-                            })
-                            
-                        elif action == "CLOSE_SPREAD":
-                            stat_arb.close_spread_trade(symbol_A, symbol_B)
-                            push_update({
-                                "type": "STAT_ARB_FLATTEN",
-                                "symbol": f"{symbol_A}/{symbol_B}",
-                                "message": f"Reversion! Z={signal['z_score']:.2f} Spread Flattened"
-                            })
-                            
-            except Exception as e:
-                print(f"[ERROR] Scan loop failed: {e}")
-                traceback.print_exc()
-            
-            # Calculate sleep time to maintain interval
-            elapsed = asyncio.get_running_loop().time() - start_time
-            sleep_time = max(1, settings.COOLDOWN_SECONDS - elapsed)
-            
-            print(f"[SLEEP] Waiting {sleep_time:.1f}s...")
-            await asyncio.sleep(sleep_time)
-            
+            await asyncio.sleep(60)
+
+            # Periodic health check
+            for svc in services:
+                health = await svc.health()
+                if not health.get("loop_alive") and health.get("running"):
+                    logger.warning(f"[HEALTH] {svc.name} loop died!")
+
     except KeyboardInterrupt:
-        print("\nStopping...")
-    finally:
-        client.shutdown()
-        print("MT5 Shutdown.")
+        print("\n[SYSTEM] Shutting down...")
+
+    # ── 8. Graceful Shutdown ──────────────────────────────────────────
+    print("[SYSTEM] Stopping services...")
+    for svc in reversed(services):
+        try:
+            await svc.stop()
+        except Exception as e:
+            logger.error(f"Error stopping {svc.name}: {e}")
+
+    await bus.stop()
+    await gateway.shutdown()
+
+    print(f"[SYSTEM] Shutdown complete. Events: {bus.event_count}, "
+          f"Errors: {bus.error_count}")
+
 
 if __name__ == "__main__":
     try:

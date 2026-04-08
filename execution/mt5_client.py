@@ -17,8 +17,13 @@ class MT5Client:
         self.deviation = settings.DEVIATION
         
     def connect(self):
-        if not mt5.initialize(path=settings.MT5_PATH):
-            print("initialize() failed")
+        if not mt5.initialize(
+            path=settings.MT5_PATH,
+            login=settings.MT5_LOGIN,
+            password=settings.MT5_PASSWORD,
+            server=settings.MT5_SERVER
+        ):
+            print(f"initialize() failed, error: {mt5.last_error()}")
             return False
             
         if not mt5.login(settings.MT5_LOGIN, password=settings.MT5_PASSWORD, server=settings.MT5_SERVER):
