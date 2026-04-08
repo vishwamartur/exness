@@ -60,12 +60,12 @@ class StrategyService(BaseService):
 
             # 1. BOS Strategy
             bos_signal = await run_in_executor(
-                self.bos.analyze, symbol, df, current_price
+                self.bos.analyze, df
             )
 
             # 2. Mean Reversion Strategy
             mr_signal = await run_in_executor(
-                self.mean_reversion.analyze, symbol, df, current_price
+                self.mean_reversion.analyze, df
             )
 
             # Combine signals

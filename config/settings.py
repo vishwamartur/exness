@@ -68,7 +68,7 @@ DEVIATION = int(os.getenv("DEVIATION", 30))     # Wider deviation for Gold volat
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
 # ─── Institutional Risk Management ───────────────────────────────────────
-FORCE_TEST_TRADES = True                                   # <--- FORCED TEST MODE
+FORCE_TEST_TRADES = False                                   # <--- LIVE TRADING MODE
 RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))       # 1% risk per scalp (XAUUSD focus)
 MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 2.0))  # 2% max for A+ Gold setups
 
@@ -77,10 +77,10 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 0.8))  # 0.8x ATR — t
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.0))  # 2.0x ATR — 1:2.5 R:R target
 
 # Confluence Gating — relaxed for more trade opportunities
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 1))  # Relaxed: 2 modules agree
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # Strict: Requires ML + Strategy agreement
 SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 4))     # Sureshot at 4
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.40))   # Relaxed: >40% ML edge is enough
-MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 1.2)) # 1:1.2 minimum R:R
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.52))   # Strict: >52% ML edge
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0)) # 1:2.0 strict minimum R:R
 
 # ─── Kelly Criterion Position Sizing ─────────────────────────────────────
 USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Criterion
@@ -191,7 +191,9 @@ TRADE_SESSIONS = {
     "ny":          {"start": 13.0, "end": 17.0},  # New York session (4 hours)
     "overlap":     {"start": 13.0, "end": 16.0},  # London/NY overlap (peak Gold)
 }
-SESSION_FILTER = os.getenv("SESSION_FILTER", "False").lower() == "true"  # Disabled — Gold 24/5
+SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"  # Enabled for strict liquidity windows
+
+USE_PATTERN_MEMORY = True  # Strict RAG historical embedding blocks
 
 # --- Data Settings -----------------------------------------------------------
 # 10 years of M15 data: 10 * 252 days * 96 bars/day = ~242,000 bars
@@ -214,6 +216,7 @@ BOS_MIN_RISK_REWARD = 2.5       # Asymmetric Payoff for Retail
 NEWS_FILTER_ENABLE = True       # Enable High-Impact News Avoidance
 BOS_REQUIRE_CONFIRMATION = True  # Require confirmation candle after BOS break
 BOS_MIN_PULLBACK_PCT = 0.3      # Min pullback as fraction of break candle range
+BOS_STRICT_MODE = True          # Block any trade where BOS direction contradicts ML direction
 
 # ─── HMM Regime Detection ───────────────────────────────────────────────
 USE_HMM_REGIME = True            # Use HMM-based regime detection for adaptive params
@@ -223,19 +226,19 @@ REGIME_PARAMS = {
     "TRENDING": {
         "ATR_TP_MULTIPLIER": 5.0,
         "ATR_SL_MULTIPLIER": 1.8,
-        "MIN_CONFLUENCE_SCORE": 1,
+        "MIN_CONFLUENCE_SCORE": 2,  # Normal confluence needed in trend
         "MAX_DAILY_TRADES": 4,
     },
     "RANGING": {
         "ATR_TP_MULTIPLIER": 2.5,
         "ATR_SL_MULTIPLIER": 1.5,
-        "MIN_CONFLUENCE_SCORE": 1,
+        "MIN_CONFLUENCE_SCORE": 3,  # Strict: Tough to trade ranges
         "MAX_DAILY_TRADES": 2,
     },
     "VOLATILE": {
         "ATR_TP_MULTIPLIER": 3.0,
         "ATR_SL_MULTIPLIER": 2.5,
-        "MIN_CONFLUENCE_SCORE": 1,
+        "MIN_CONFLUENCE_SCORE": 3,  # Strict: Avoid chaotic whipsaws
         "MAX_DAILY_TRADES": 1,
     },
 }

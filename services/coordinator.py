@@ -230,6 +230,32 @@ class CoordinatorService(BaseService):
         """Evaluate collected signals to produce trade candidates."""
         candidates = []
 
+        # --- FORCED TESTING BYPASS ---
+        if getattr(settings, 'FORCE_TEST_TRADES', False) and self._quant_signals:
+            symbol = list(self._quant_signals.keys())[0]
+            try:
+                sym_info = mt5.symbol_info(symbol)
+                point = sym_info.point if sym_info else 0.01
+            except:
+                point = 0.01
+
+            return [{
+                'symbol': symbol,
+                'direction': 'BUY',
+                'score': 10,
+                'ml_prob': 1.0,
+                'ensemble_score': 10,
+                'regime': 'TRENDING',
+                'regime_type': 'TRENDING',
+                'sl_distance': point * 200,
+                'tp_distance': point * 400,
+                'scaling_factor': 1.0,
+                'emotion_state': 'NEUTRAL',
+                'emotion_score': 0.5,
+                'details': {'FORCED': 'Test mode active'},
+                'features': {}
+            }]
+
         for symbol, qs in self._quant_signals.items():
             # Check Circuit Breakers
             if self._circuit_breakers.get(symbol, False):

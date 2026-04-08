@@ -157,8 +157,9 @@ async def main():
             # Periodic health check
             for svc in services:
                 health = await svc.health()
-                if not health.get("loop_alive") and health.get("running"):
-                    logger.warning(f"[HEALTH] {svc.name} loop died!")
+                if health.get("error_count", 0) > 0:
+                    logger.warning(f"[HEALTH] {svc.name} has {health['error_count']} errors")
+                # Removed loop_alive check since most services are pure event-driven and have no continuous loop
 
     except KeyboardInterrupt:
         print("\n[SYSTEM] Shutting down...")

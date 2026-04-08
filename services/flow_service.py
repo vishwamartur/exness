@@ -61,15 +61,16 @@ class FlowService(BaseService):
 
             # Analyze Flow
             flow_analysis = await run_in_executor(
-                self.flow_detector.analyze_flow, df, current_price
+                self.flow_detector.analyze, symbol, data_dict
             )
 
             # Extract specifics
             direction = flow_analysis.get("direction", "NEUTRAL")
-            strength_score = flow_analysis.get("footprint_score", 0.0)
+            strength_score = flow_analysis.get("score", 0.0)
 
             # Base format: 0 to 1 scaling, adapt to system's integer scoring if needed.
-            scale_score = min(max(int(strength_score * 5), -5), 5)
+            # Convert 0-100 score to roughly 0-5 scale
+            scale_score = min(max(int(strength_score / 20), -5), 5)
 
             await self.emit("FLOW_UPDATE", {
                 "symbol": symbol,

@@ -48,7 +48,7 @@ class GeminiNewsAnalyzer:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
         self.client = None
-        self.model_id = "gemini-2.0-flash"
+        self.model_id = "gemma-4-31b-it"
         self.cache = {}  # {symbol: (timestamp, result)}
         self.cache_ttl = 900  # 15 minutes — avoid API spam
         self._initialized = False
