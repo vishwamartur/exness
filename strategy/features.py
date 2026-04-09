@@ -10,7 +10,16 @@ def add_technical_features(df):
     Includes market structure, order blocks, FVGs, liquidity levels,
     and standard momentum/volatility indicators.
     """
-    df = df.copy()
+    # Force full DataFrame reconstruction to avoid pandas internal BlockManager
+    # "tuple index out of range" bug when inserting new columns.
+    # A simple .copy() can preserve fragmented blocks; reconstruction fixes it.
+    df = pd.DataFrame(df.values, columns=df.columns.tolist(), index=df.index.copy())
+    # Restore dtypes that may have been lost during reconstruction
+    for col in df.columns:
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except (ValueError, TypeError):
+            pass  # Column contains non-numeric data, leave as-is
 
     # ─── 1. Price Computations ───────────────────────────────────────────
     df['log_ret'] = np.log(df['close'] / df['close'].shift(1))
@@ -189,6 +198,9 @@ def add_technical_features(df):
             df['is_asian'] = ((hour >= 0) & (hour < 8)).astype(int)
         except Exception:
             pass  # Skip if time column can't be parsed
+
+    # Defragment DataFrame after many column insertions above
+    df = df.copy()
 
     # ─── 8. GARCH-Style Volatility Forecast ──────────────────────────────
     # EWMA variance as fast GARCH(1,1) approximation (avoids arch library dependency).
