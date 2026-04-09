@@ -91,6 +91,10 @@ class BroadcastService(BaseService):
         ):
             return
 
+        # Skip heavy data events (contain DataFrames that can't be serialized)
+        if ev_type in (EventTypes.MARKET_DATA_READY, EventTypes.TICK_UPDATE):
+            return
+
         # Update in-memory state
         self._update_state(event)
 

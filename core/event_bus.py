@@ -43,6 +43,8 @@ class EventTypes:
     CANDLE_READY       = "CANDLE_READY"
     MARKET_DATA_READY  = "MARKET_DATA_READY"
     NEWS_UPDATE        = "NEWS_UPDATE"
+    NEWS_TRADE_SIGNAL  = "NEWS_TRADE_SIGNAL"
+    NEWS_STRADDLE_REQUEST = "NEWS_STRADDLE_REQUEST"
 
     # Analysis
     QUANT_SIGNAL       = "QUANT_SIGNAL"
@@ -103,6 +105,8 @@ _EVENT_PRIORITY: Dict[str, EventPriority] = {
     EventTypes.CANDLE_READY:       EventPriority.DATA,
     EventTypes.MARKET_DATA_READY:  EventPriority.DATA,
     EventTypes.NEWS_UPDATE:        EventPriority.DATA,
+    EventTypes.NEWS_TRADE_SIGNAL:  EventPriority.ANALYSIS,
+    EventTypes.NEWS_STRADDLE_REQUEST: EventPriority.EXECUTION,
 
     EventTypes.SCAN_START:         EventPriority.OUTPUT,
     EventTypes.SCAN_COMPLETE:      EventPriority.OUTPUT,

@@ -180,6 +180,20 @@ NEWS_CALENDAR_CACHE_MINUTES = NEWS_CACHE_HOURS * 60  # Backward-compatible alias
 NEWS_PRE_MINUTES = int(os.getenv("NEWS_PRE_MINUTES", 15))   # Block 15 min before high-impact news
 NEWS_POST_MINUTES = int(os.getenv("NEWS_POST_MINUTES", 15)) # Block 15 min after high-impact news
 
+# ─── News-Based Trading (Active News Trading on XAUUSD) ──────────────────
+NEWS_TRADING_ENABLED = os.getenv("NEWS_TRADING_ENABLED", "True").lower() == "true"
+NEWS_TRADING_MODE = os.getenv("NEWS_TRADING_MODE", "BREAKOUT")  # STRADDLE or BREAKOUT
+NEWS_TRADING_SYMBOLS = ["XAUUSD"]  # Only gold — highest news sensitivity
+NEWS_LOOKAHEAD_MINUTES = int(os.getenv("NEWS_LOOKAHEAD_MINUTES", 30))  # Pre-position window
+NEWS_ATR_SL_MULTIPLIER = float(os.getenv("NEWS_ATR_SL_MULTIPLIER", 2.0))  # Wider SL for news vol
+NEWS_ATR_TP_MULTIPLIER = float(os.getenv("NEWS_ATR_TP_MULTIPLIER", 4.0))  # Wider TP for momentum
+NEWS_LOT_REDUCTION = float(os.getenv("NEWS_LOT_REDUCTION", 0.5))  # 50% lot size vs normal
+NEWS_BREAKOUT_CONFIRM_CANDLES = int(os.getenv("NEWS_BREAKOUT_CONFIRM_CANDLES", 1))  # Candles to confirm
+NEWS_STRADDLE_DISTANCE_ATR = float(os.getenv("NEWS_STRADDLE_DISTANCE_ATR", 1.5))  # Straddle distance
+NEWS_POST_EVENT_COOLDOWN = int(os.getenv("NEWS_POST_EVENT_COOLDOWN", 300))  # 5 min cooldown after news trade
+NEWS_MAX_TRADES_PER_EVENT = int(os.getenv("NEWS_MAX_TRADES_PER_EVENT", 1))  # Max trades per event
+NEWS_MIN_ATR_FOR_TRADE = float(os.getenv("NEWS_MIN_ATR_FOR_TRADE", 1.0))  # Min ATR in USD for Gold news
+
 # ─── Fake News Detection ─────────────────────────────────────────────────
 FAKE_NEWS_DETECTION_ENABLED = os.getenv("FAKE_NEWS_DETECTION_ENABLED", "True").lower() == "true"
 FAKE_NEWS_MIN_CREDIBILITY = float(os.getenv("FAKE_NEWS_MIN_CREDIBILITY", 0.4))    # Below this = flagged suspicious

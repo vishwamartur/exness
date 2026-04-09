@@ -51,6 +51,7 @@ from services.coordinator import CoordinatorService
 from services.strategy_service import StrategyService
 from services.flow_service import FlowService
 from services.performance_service import PerformanceService
+from services.news_trading_service import NewsTradingService
 
 
 async def main():
@@ -111,6 +112,7 @@ async def main():
         SentimentService(bus),
         StrategyService(bus),
         FlowService(bus),
+        NewsTradingService(bus),
 
         # Decision layer
         RiskService(bus, gateway, risk_manager=risk_manager),

@@ -296,3 +296,206 @@ def get_active_events(now_utc=None):
             active.append(event['name'])
 
     return active
+
+
+# ─── News Trading Opportunities ──────────────────────────────────────────
+
+# Event classification for XAUUSD trading behavior
+_EVENT_CLASSIFICATION = {
+    # NFP: Huge initial spike, often mean-reverts within 30-60 min
+    "NFP": {"type": "NFP", "volatility": "EXTREME", "pattern": "SPIKE_REVERT",
+            "expected_move_pips": 300, "revert_probability": 0.65},
+    "Non-Farm": {"type": "NFP", "volatility": "EXTREME", "pattern": "SPIKE_REVERT",
+                 "expected_move_pips": 300, "revert_probability": 0.65},
+    "Nonfarm": {"type": "NFP", "volatility": "EXTREME", "pattern": "SPIKE_REVERT",
+                "expected_move_pips": 300, "revert_probability": 0.65},
+    # FOMC: Sustained directional move, can trend for hours
+    "FOMC": {"type": "FOMC", "volatility": "EXTREME", "pattern": "SUSTAINED_TREND",
+             "expected_move_pips": 400, "revert_probability": 0.25},
+    "Federal Funds Rate": {"type": "FOMC", "volatility": "EXTREME", "pattern": "SUSTAINED_TREND",
+                           "expected_move_pips": 400, "revert_probability": 0.25},
+    "Fed Interest Rate": {"type": "FOMC", "volatility": "EXTREME", "pattern": "SUSTAINED_TREND",
+                          "expected_move_pips": 400, "revert_probability": 0.25},
+    # CPI: Sharp spike, partial reversion, then continuation
+    "CPI": {"type": "CPI", "volatility": "HIGH", "pattern": "SPIKE_CONTINUE",
+            "expected_move_pips": 200, "revert_probability": 0.40},
+    "Consumer Price": {"type": "CPI", "volatility": "HIGH", "pattern": "SPIKE_CONTINUE",
+                       "expected_move_pips": 200, "revert_probability": 0.40},
+    "Inflation Rate": {"type": "CPI", "volatility": "HIGH", "pattern": "SPIKE_CONTINUE",
+                       "expected_move_pips": 200, "revert_probability": 0.40},
+    # PPI: Moderate, often front-runs CPI
+    "PPI": {"type": "PPI", "volatility": "MEDIUM", "pattern": "SPIKE_CONTINUE",
+            "expected_move_pips": 120, "revert_probability": 0.45},
+    "Producer Price": {"type": "PPI", "volatility": "MEDIUM", "pattern": "SPIKE_CONTINUE",
+                       "expected_move_pips": 120, "revert_probability": 0.45},
+    # GDP
+    "GDP": {"type": "GDP", "volatility": "MEDIUM", "pattern": "SPIKE_CONTINUE",
+            "expected_move_pips": 150, "revert_probability": 0.40},
+    # Retail Sales
+    "Retail Sales": {"type": "RETAIL", "volatility": "MEDIUM", "pattern": "SPIKE_REVERT",
+                     "expected_move_pips": 100, "revert_probability": 0.55},
+    # ISM/PMI
+    "ISM": {"type": "ISM", "volatility": "MEDIUM", "pattern": "SPIKE_REVERT",
+            "expected_move_pips": 100, "revert_probability": 0.50},
+    # Unemployment Claims
+    "Unemployment Claims": {"type": "CLAIMS", "volatility": "LOW", "pattern": "SPIKE_REVERT",
+                            "expected_move_pips": 60, "revert_probability": 0.60},
+    "Initial Jobless": {"type": "CLAIMS", "volatility": "LOW", "pattern": "SPIKE_REVERT",
+                        "expected_move_pips": 60, "revert_probability": 0.60},
+    # ECB / BOE — affect gold via USD cross-rates
+    "ECB": {"type": "ECB", "volatility": "HIGH", "pattern": "SUSTAINED_TREND",
+            "expected_move_pips": 150, "revert_probability": 0.30},
+    "BOE": {"type": "BOE", "volatility": "MEDIUM", "pattern": "SUSTAINED_TREND",
+            "expected_move_pips": 100, "revert_probability": 0.35},
+}
+
+
+def classify_event_impact(event_name: str) -> dict:
+    """
+    Classify a news event by its expected impact pattern on XAUUSD.
+    Returns event type, volatility level, expected pattern, and move size.
+    """
+    name_upper = event_name.upper()
+    for keyword, classification in _EVENT_CLASSIFICATION.items():
+        if keyword.upper() in name_upper:
+            return {**classification, "matched_keyword": keyword}
+
+    # Default for unmatched high-impact events
+    return {
+        "type": "OTHER",
+        "volatility": "MEDIUM",
+        "pattern": "SPIKE_REVERT",
+        "expected_move_pips": 80,
+        "revert_probability": 0.50,
+        "matched_keyword": None,
+    }
+
+
+def get_news_trade_opportunities(symbols=None, now_utc=None, lookahead_minutes=30):
+    """
+    Find upcoming high-impact USD news events that create XAUUSD trading
+    opportunities within the lookahead window.
+
+    Returns a list of dicts:
+        {
+            'name': str,
+            'currency': str,
+            'dt_utc': datetime,
+            'minutes_until': float,
+            'classification': dict,
+            'tradeable_symbols': list,
+        }
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    if symbols is None:
+        symbols = ["XAUUSD"]
+
+    cutoff = now_utc + timedelta(minutes=lookahead_minutes)
+
+    # Gold-relevant currencies (USD directly, EUR/GBP via cross-rate effects)
+    gold_currencies = {"USD", "EUR", "GBP"}
+
+    opportunities = []
+
+    # Check live calendar
+    for ev in _fetch_calendar():
+        if ev['currency'] not in gold_currencies:
+            continue
+        if not (now_utc <= ev['dt_utc'] <= cutoff):
+            continue
+
+        classification = classify_event_impact(ev['name'])
+        minutes_until = (ev['dt_utc'] - now_utc).total_seconds() / 60.0
+
+        # Filter: only trade events with at least MEDIUM volatility
+        if classification['volatility'] in ('LOW',):
+            continue
+
+        # Find which XAUUSD variants are available
+        tradeable = []
+        for sym in symbols:
+            base = _strip_suffix(sym).upper()
+            if "XAU" in base or "GOLD" in base:
+                tradeable.append(sym)
+
+        if not tradeable:
+            continue
+
+        opportunities.append({
+            'name': ev['name'],
+            'currency': ev['currency'],
+            'dt_utc': ev['dt_utc'],
+            'minutes_until': round(minutes_until, 1),
+            'classification': classification,
+            'tradeable_symbols': tradeable,
+        })
+
+    # Also check hardcoded schedule for nearby events
+    for event in HIGH_IMPACT_EVENTS:
+        if event.get('day_of_week') is not None and now_utc.weekday() != event['day_of_week']:
+            continue
+        if event.get('week_of_month') is not None:
+            if _get_week_of_month(now_utc) != event['week_of_month']:
+                continue
+
+        event_time = now_utc.replace(
+            hour=event['hour'], minute=event['minute'], second=0, microsecond=0
+        )
+        if not (now_utc <= event_time <= cutoff):
+            continue
+
+        # Check if this hardcoded event isn't already covered by live feed
+        already_covered = any(
+            abs((opp['dt_utc'] - event_time).total_seconds()) < 600
+            for opp in opportunities
+        )
+        if already_covered:
+            continue
+
+        # Only USD events affect gold directly
+        if 'USD' not in event.get('affected', []):
+            continue
+
+        classification = classify_event_impact(event['name'])
+        minutes_until = (event_time - now_utc).total_seconds() / 60.0
+
+        tradeable = []
+        for sym in (symbols or ["XAUUSD"]):
+            base = _strip_suffix(sym).upper()
+            if "XAU" in base or "GOLD" in base:
+                tradeable.append(sym)
+
+        if tradeable:
+            opportunities.append({
+                'name': event['name'],
+                'currency': 'USD',
+                'dt_utc': event_time,
+                'minutes_until': round(minutes_until, 1),
+                'classification': classification,
+                'tradeable_symbols': tradeable,
+            })
+
+    opportunities.sort(key=lambda x: x['dt_utc'])
+    return opportunities
+
+
+def get_pre_news_window(event_dt_utc, mode="BREAKOUT"):
+    """
+    Calculate the pre-news preparation window for a given event.
+
+    For STRADDLE mode: place orders 5-15 minutes before event
+    For BREAKOUT mode: start monitoring 2 minutes before, trade after first confirmed candle
+
+    Returns (window_start, window_end, action_description)
+    """
+    if mode == "STRADDLE":
+        window_start = event_dt_utc - timedelta(minutes=15)
+        window_end = event_dt_utc - timedelta(minutes=2)
+        action = "Place buy-stop/sell-stop straddle"
+    else:  # BREAKOUT
+        window_start = event_dt_utc - timedelta(minutes=5)
+        window_end = event_dt_utc + timedelta(minutes=15)
+        action = "Monitor for post-news breakout confirmation"
+
+    return window_start, window_end, action

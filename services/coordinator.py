@@ -48,6 +48,10 @@ class CoordinatorService(BaseService):
         self._flow_data: Dict[str, dict] = {}
         self._circuit_breakers: Dict[str, bool] = {}
 
+        # News trading state
+        self._news_window_symbols: set = set()  # Symbols in active news window
+        self._news_event_info: Dict[str, dict] = {}  # Current news event details
+
         # Pattern memory
         self.pattern_memory = None
         try:
@@ -78,6 +82,7 @@ class CoordinatorService(BaseService):
         self.bus.subscribe("FLOW_UPDATE", self._on_flow_update)
         self.bus.subscribe("CIRCUIT_BREAKER_UPDATE", self._on_circuit_breaker)
         self.bus.subscribe(EventTypes.TRADE_EXECUTED, self._on_trade_executed)
+        self.bus.subscribe(EventTypes.NEWS_TRADE_SIGNAL, self._on_news_trade_signal)
 
     async def _run_loop(self):
         """Main scan loop — runs periodically."""
@@ -119,6 +124,10 @@ class CoordinatorService(BaseService):
         active_news = get_active_events()
         if active_news:
             print(f"[NEWS] {', '.join(active_news)}")
+
+        # Show news trading status
+        if self._news_window_symbols:
+            print(f"[NEWS TRADE] Active news window for: {', '.join(self._news_window_symbols)}")
 
         # Clear aggregation buffers for new cycle
         self._quant_signals.clear()
@@ -262,6 +271,14 @@ class CoordinatorService(BaseService):
                 qs["_reject_reason"] = "Circuit Breaker Tripped"
                 continue
 
+            # Skip XAUUSD normal candidates during active news window
+            # (NewsTradingService handles XAUUSD during news events)
+            from utils.news_filter import _strip_suffix
+            stripped = _strip_suffix(symbol).upper()
+            if stripped in {s.upper() for s in self._news_window_symbols}:
+                qs["_reject_reason"] = "News Window Active (handled by NewsTradingService)"
+                continue
+
             direction = qs.get("direction", "NEUTRAL")
             score = qs.get("score", 0)
             ml_prob = qs.get("ml_prob", 0.5)
@@ -402,6 +419,35 @@ class CoordinatorService(BaseService):
         self._daily_trade_count += 1
         symbol = event.payload.get("symbol", "")
         self._last_trade_time[symbol] = time.time()
+
+    async def _on_news_trade_signal(self, event: Event):
+        """Track active news trading windows to suppress normal candidates."""
+        symbols = event.payload.get("symbols", [])
+        event_key = event.payload.get("event_key", "")
+        event_name = event.payload.get("event_name", "")
+        minutes_until = event.payload.get("minutes_until", 0)
+
+        for sym in symbols:
+            from utils.news_filter import _strip_suffix
+            self._news_window_symbols.add(_strip_suffix(sym).upper())
+
+        self._news_event_info[event_key] = event.payload
+
+        logger.info(
+            f"[NEWS] Suppressing normal scalping for {', '.join(symbols)} — "
+            f"{event_name} in {minutes_until:.0f}min"
+        )
+
+        # Auto-clear news window after the event passes (30 min after event time)
+        asyncio.create_task(self._clear_news_window_later(symbols, delay_minutes=45))
+
+    async def _clear_news_window_later(self, symbols, delay_minutes=45):
+        """Clear the news window suppression after the event passes."""
+        await asyncio.sleep(delay_minutes * 60)
+        for sym in symbols:
+            from utils.news_filter import _strip_suffix
+            self._news_window_symbols.discard(_strip_suffix(sym).upper())
+        logger.info(f"[NEWS] News window cleared for {', '.join(symbols)}")
 
     # ─── Dashboard Updates ────────────────────────────────────────────────
 
