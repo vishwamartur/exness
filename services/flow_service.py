@@ -59,10 +59,16 @@ class FlowService(BaseService):
             tick = event.payload.get("tick")
             current_price = tick["ask"] if tick else df["close"].iloc[-1]
 
+            analyze_fn = getattr(self.flow_detector, "analyze", None)
+            if not callable(analyze_fn):
+                analyze_fn = getattr(self.flow_detector, "analyze_flow", None)
+            if not callable(analyze_fn):
+                raise AttributeError(
+                    f"{type(self.flow_detector).__name__} has no analyze/analyze_flow method"
+                )
+
             # Analyze Flow
-            flow_analysis = await run_in_executor(
-                self.flow_detector.analyze, symbol, data_dict
-            )
+            flow_analysis = await run_in_executor(analyze_fn, symbol, data_dict)
 
             # Extract specifics
             direction = flow_analysis.get("direction", "NEUTRAL")

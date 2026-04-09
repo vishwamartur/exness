@@ -100,6 +100,12 @@ class InstitutionalFlowDetector:
             logger.error(f"[{symbol}] InstitutionalFlowDetector error: {e}")
             return self._empty_result(f"Error: {e}")
 
+    def analyze_flow(self, symbol: str, data_dict: dict) -> dict:
+        """
+        Backward-compatible alias for older callers that still use analyze_flow().
+        """
+        return self.analyze(symbol, data_dict)
+
     # ─── Volume Anomaly Detection ────────────────────────────────────────────
 
     def _detect_volume_anomalies(self, df: pd.DataFrame) -> dict:

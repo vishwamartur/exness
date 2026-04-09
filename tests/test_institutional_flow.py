@@ -344,6 +344,25 @@ def test_edge_cases():
     print("  [PASS]: Edge cases handled correctly")
 
 
+def test_analyze_flow_backward_compatibility():
+    """Legacy analyze_flow entry point should mirror analyze()."""
+    print("\n" + "=" * 60)
+    print("TEST 9: Backward Compatibility")
+    print("=" * 60)
+
+    from analysis.institutional_flow_detector import InstitutionalFlowDetector
+    detector = InstitutionalFlowDetector()
+
+    df = create_synthetic_data(200, 'displacement_bull')
+    analyze_result = detector.analyze('EURUSD', {'M1': df})
+    legacy_result = detector.analyze_flow('EURUSD', {'M1': df})
+
+    print(f"  analyze score={analyze_result['score']}, analyze_flow score={legacy_result['score']}")
+    assert legacy_result == analyze_result, "analyze_flow() should behave exactly like analyze()"
+
+    print("  [PASS]: Backward-compatible analyze_flow alias works")
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("  INSTITUTIONAL FLOW DETECTOR -- TEST SUITE")
@@ -358,6 +377,7 @@ if __name__ == '__main__':
         test_trade_blocking,
         test_position_scaling,
         test_edge_cases,
+        test_analyze_flow_backward_compatibility,
     ]
     
     passed = 0
