@@ -106,6 +106,19 @@ class TradeManagerService(BaseService):
                 symbol, positions, tick, atr=atr, df=df_for_exit
             )
 
+            # ⚡ QUICK SCALP MODE — aggressive inline profit booking
+            if getattr(settings, 'QUICK_SCALP_MODE', False) and atr > 0:
+                quick_actions = self._quick_scalp_manage(symbol, positions, tick, atr)
+                # Merge: quick scalp actions override (dedupe by ticket)
+                existing_tickets = {a.get("ticket") for a in actions}
+                for qa in quick_actions:
+                    if qa.get("ticket") not in existing_tickets:
+                        actions.append(qa)
+                    else:
+                        # Quick scalp action takes priority
+                        actions = [a for a in actions if a.get("ticket") != qa.get("ticket")]
+                        actions.append(qa)
+
             # Execute actions
             for act in actions:
                 try:
@@ -174,6 +187,111 @@ class TradeManagerService(BaseService):
 
         except Exception as e:
             logger.error(f"[{symbol}] Symbol management error: {e}")
+
+    def _quick_scalp_manage(self, symbol: str, positions: list, tick, atr: float) -> list:
+        """
+        ⚡ Quick Scalp Mode: aggressive profit booking logic.
+        - Book 50% profit at 0.3x ATR
+        - Move to breakeven at 0.3x ATR
+        - Trail tightly at 0.4x ATR
+        - Cut losers fast at 0.3x ATR against
+        """
+        import MetaTrader5 as _mt5
+        actions = []
+
+        be_atr = getattr(settings, 'QUICK_SCALP_BREAKEVEN_ATR', 0.3)
+        trail_atr = getattr(settings, 'QUICK_SCALP_TRAIL_ATR', 0.4)
+        partial_frac = getattr(settings, 'QUICK_SCALP_PARTIAL_FRACTION', 0.50)
+        early_cut_atr = getattr(settings, 'QUICK_SCALP_EARLY_CUT_ATR', 0.3)
+
+        for pos in positions:
+            try:
+                is_buy = pos.type == _mt5.ORDER_TYPE_BUY
+                entry = pos.price_open
+                current_sl = pos.sl
+
+                if is_buy:
+                    profit_dist = tick.bid - entry
+                    loss_dist = entry - tick.bid
+                else:
+                    profit_dist = entry - tick.ask
+                    loss_dist = tick.ask - entry
+
+                # 1. Quick loss cut — if losing > 0.3x ATR, close immediately
+                if loss_dist >= early_cut_atr * atr and profit_dist < 0:
+                    print(f"[QUICK SCALP] ⚡ {symbol} #{pos.ticket} — Early loss cut "
+                          f"(loss={loss_dist:.4f} > {early_cut_atr}xATR)")
+                    actions.append({
+                        "type": "CLOSE",
+                        "ticket": pos.ticket,
+                        "reason": f"QScalp early loss cut ({loss_dist:.4f})"
+                    })
+                    continue
+
+                # 2. Partial close at breakeven threshold (50% off)
+                if profit_dist >= be_atr * atr:
+                    # If we haven't taken partial yet (track by a simple volume check)
+                    if pos.volume > getattr(settings, 'LOT_SIZE', 0.01) * 0.6:
+                        print(f"[QUICK SCALP] ⚡ {symbol} #{pos.ticket} — Partial close 50% "
+                              f"(profit={profit_dist:.4f})")
+                        actions.append({
+                            "type": "PARTIAL",
+                            "ticket": pos.ticket,
+                            "fraction": partial_frac,
+                            "reason": f"QScalp partial profit at {profit_dist:.4f}"
+                        })
+
+                    # 3. Move SL to breakeven
+                    if is_buy:
+                        new_sl = entry + (atr * 0.02)  # tiny buffer
+                        if new_sl > current_sl:
+                            print(f"[QUICK SCALP] ⚡ {symbol} #{pos.ticket} — Move to breakeven")
+                            actions.append({
+                                "type": "MODIFY",
+                                "ticket": pos.ticket,
+                                "sl": new_sl,
+                                "tp": pos.tp,
+                                "reason": "QScalp breakeven lock"
+                            })
+                    else:
+                        new_sl = entry - (atr * 0.02)
+                        if new_sl < current_sl or current_sl == 0:
+                            print(f"[QUICK SCALP] ⚡ {symbol} #{pos.ticket} — Move to breakeven")
+                            actions.append({
+                                "type": "MODIFY",
+                                "ticket": pos.ticket,
+                                "sl": new_sl,
+                                "tp": pos.tp,
+                                "reason": "QScalp breakeven lock"
+                            })
+
+                # 4. Aggressive trailing stop at 0.4x ATR
+                trail_dist = trail_atr * atr
+                if is_buy:
+                    trail_sl = tick.bid - trail_dist
+                    if trail_sl > current_sl and trail_sl < tick.bid:
+                        actions.append({
+                            "type": "MODIFY",
+                            "ticket": pos.ticket,
+                            "sl": trail_sl,
+                            "tp": pos.tp,
+                            "reason": f"QScalp trail {trail_dist:.4f}"
+                        })
+                else:
+                    trail_sl = tick.ask + trail_dist
+                    if (trail_sl < current_sl or current_sl == 0) and trail_sl > tick.ask:
+                        actions.append({
+                            "type": "MODIFY",
+                            "ticket": pos.ticket,
+                            "sl": trail_sl,
+                            "tp": pos.tp,
+                            "reason": f"QScalp trail {trail_dist:.4f}"
+                        })
+
+            except Exception as e:
+                logger.debug(f"[{symbol}] Quick scalp manage error: {e}")
+
+        return actions
 
     async def _get_atr(self, symbol: str) -> float:
         """Get ATR for a symbol (cached 5 min)."""

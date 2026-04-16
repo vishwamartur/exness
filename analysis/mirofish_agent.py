@@ -100,7 +100,7 @@ class MiroFishAgent:
             
         return None
     
-    def get_symbol_signal(self, symbol: str) -> Tuple[str, int]:
+    def get_symbol_signal(self, symbol: str, market_data: Dict[str, Any] = None) -> Tuple[str, int]:
         """
         Get MiroFish prediction for a specific symbol.
         
@@ -109,7 +109,7 @@ class MiroFishAgent:
             direction: 'BULLISH', 'BEARISH', or 'NEUTRAL'
             confidence: 0-100
         """
-        prediction = self.get_prediction()
+        prediction = self.get_prediction(symbols=[symbol], market_data=market_data)
         if not prediction:
             return "NEUTRAL", 0
         
@@ -125,7 +125,7 @@ class MiroFishAgent:
         # Fall back to global sentiment
         return prediction.get("sentiment", "NEUTRAL"), prediction.get("confidence", 0)
     
-    def get_confluence_bonus(self, symbol: str, trade_direction: str) -> int:
+    def get_confluence_bonus(self, symbol: str, trade_direction: str, market_data: Dict[str, Any] = None) -> int:
         """
         Calculate confluence bonus from MiroFish prediction.
         
@@ -133,7 +133,7 @@ class MiroFishAgent:
             +1 if MiroFish strongly agrees with trade direction
              0 otherwise
         """
-        direction, confidence = self.get_symbol_signal(symbol)
+        direction, confidence = self.get_symbol_signal(symbol, market_data)
         
         if confidence < 60:
             return 0
@@ -481,7 +481,7 @@ class MiroFishAgent:
         per_asset = {}
         
         # Known symbols to look for
-        all_symbols = list(settings.ALL_BASE_SYMBOLS) if hasattr(settings, 'ALL_BASE_SYMBOLS') else [
+        all_symbols = list(settings.ALL_BASE_SYMBOLS) if hasattr(settings, 'ALL_BASE_SYMBOLS') and settings.ALL_BASE_SYMBOLS else [
             "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", 
             "XAUUSD", "LTCUSD", "XRPUSD"
         ]

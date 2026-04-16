@@ -67,6 +67,45 @@ LOT_SIZE = float(os.getenv("LOT_SIZE", 0.01))  # Base lot size
 DEVIATION = int(os.getenv("DEVIATION", 30))     # Wider deviation for Gold volatility
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
+# ─── ⚡ QUICK SCALP MODE — Big Lots, Fast Entry, Book Profit Fast ────────────
+# Enable this when you have sufficient balance and want high-frequency
+# aggressive scalping with larger position sizes and rapid profit booking.
+QUICK_SCALP_MODE = os.getenv("QUICK_SCALP_MODE", "True").lower() == "true"
+
+# Big Lot sizing for Quick Scalp
+QUICK_SCALP_LOT_SIZE = float(os.getenv("QUICK_SCALP_LOT_SIZE", 0.5))  # 0.5 lot per trade (big)
+QUICK_SCALP_MAX_LOT = float(os.getenv("QUICK_SCALP_MAX_LOT", 2.0))    # Max 2.0 lot cap
+QUICK_SCALP_RISK_PERCENT = float(os.getenv("QUICK_SCALP_RISK_PERCENT", 3.0))  # 3% risk per scalp
+
+# Fast SL/TP — tight SL, book profit quickly at 1:1.2 R:R minimum
+QUICK_SCALP_SL_ATR = float(os.getenv("QUICK_SCALP_SL_ATR", 0.5))   # 0.5x ATR — very tight SL
+QUICK_SCALP_TP_ATR = float(os.getenv("QUICK_SCALP_TP_ATR", 1.0))   # 1.0x ATR — book profit fast
+QUICK_SCALP_MIN_RR = float(os.getenv("QUICK_SCALP_MIN_RR", 1.2))   # 1:1.2 enough for quick scalp
+
+# Speed — low cooldown, fast cycles, low confluence bar
+QUICK_SCALP_COOLDOWN = int(os.getenv("QUICK_SCALP_COOLDOWN", 30))        # 30s between trades
+QUICK_SCALP_MIN_CONFLUENCE = int(os.getenv("QUICK_SCALP_MIN_CONFLUENCE", 1))  # Allow score ≥ 1
+QUICK_SCALP_MIN_ML_PROB = float(os.getenv("QUICK_SCALP_MIN_ML_PROB", 0.50))  # Prob ≥ 50%
+QUICK_SCALP_MAX_POSITIONS = int(os.getenv("QUICK_SCALP_MAX_POSITIONS", 5))   # Up to 5 concurrent
+
+# Aggressive Profit Booking - lock in profits immediately
+QUICK_SCALP_BREAKEVEN_ATR = float(os.getenv("QUICK_SCALP_BREAKEVEN_ATR", 0.3))  # BE at 0.3x ATR
+QUICK_SCALP_TRAIL_ATR = float(os.getenv("QUICK_SCALP_TRAIL_ATR", 0.4))          # Trail at 0.4x ATR
+QUICK_SCALP_PARTIAL_FRACTION = float(os.getenv("QUICK_SCALP_PARTIAL_FRACTION", 0.50))  # Close 50% at BE
+QUICK_SCALP_EARLY_CUT_ATR = float(os.getenv("QUICK_SCALP_EARLY_CUT_ATR", 0.3))  # Cut losers at 0.3x ATR
+
+# Always use MARKET orders (not limit) — instant fill
+QUICK_SCALP_MARKET_ORDER = os.getenv("QUICK_SCALP_MARKET_ORDER", "True").lower() == "true"
+
+print(f"[SETTINGS] QUICK_SCALP_MODE: {'ENABLED ⚡ (Big Lots, Fast Entry)' if QUICK_SCALP_MODE else 'disabled'}")
+
+# ─── 🧠 Gemma 4 Brain Settings ─────────────────────────────────────────────
+GEMMA_BRAIN_ENABLED = os.getenv("GEMMA_BRAIN_ENABLED", "True").lower() == "true"
+GEMMA_MIN_CONFIDENCE = int(os.getenv("GEMMA_MIN_CONFIDENCE", 55))    # Block trades below 55% Gemma confidence
+GEMMA_BOOST_THRESHOLD = int(os.getenv("GEMMA_BOOST_THRESHOLD", 75))  # Boost score when Gemma ≥ 75% confident
+print(f"[SETTINGS] GEMMA_BRAIN: {'ENABLED 🧠' if GEMMA_BRAIN_ENABLED else 'disabled'}")
+
+
 # ─── Institutional Risk Management ───────────────────────────────────────
 FORCE_TEST_TRADES = False                                   # <--- LIVE TRADING MODE
 RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))       # 1% risk per scalp (XAUUSD focus)
@@ -93,7 +132,7 @@ MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit mu
 
 
 #─── Trade Management────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 120))    # 2-minute cooldown for scalping
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 30 if os.getenv("QUICK_SCALP_MODE", "True").lower() == "true" else 120))    # 30s in quick scalp mode, 2-min otherwise
 RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 2.0))    # Scale up to 2x on A+ setups
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 9999))   # Unlimited trades (XAUUSD focus)
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 100.0)) # Hard stop if daily loss > $100

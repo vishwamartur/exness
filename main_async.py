@@ -52,6 +52,7 @@ from services.strategy_service import StrategyService
 from services.flow_service import FlowService
 from services.performance_service import PerformanceService
 from services.news_trading_service import NewsTradingService
+from services.gemma_brain_service import GemmaBrainService
 
 
 async def main():
@@ -102,6 +103,13 @@ async def main():
     mt5_client = MT5Client()
     risk_manager = RiskManager(mt5_client)
 
+    # 🧠 Gemma 4 Brain — instantiate before services list
+    gemma_brain = None
+    if getattr(settings, 'GEMMA_BRAIN_ENABLED', True):
+        gemma_brain = GemmaBrainService(bus, gateway)
+
+    risk_svc = RiskService(bus, gateway, risk_manager=risk_manager)
+
     services = [
         # Data layer
         MarketDataService(bus, gateway),
@@ -114,8 +122,11 @@ async def main():
         FlowService(bus),
         NewsTradingService(bus),
 
+        # 🧠 Gemma 4 Brain — AI trader vetting layer
+        *([gemma_brain] if gemma_brain else []),
+
         # Decision layer
-        RiskService(bus, gateway, risk_manager=risk_manager),
+        risk_svc,
         PerformanceService(bus),
 
         # Execution layer
@@ -147,6 +158,9 @@ async def main():
     print(f"  ALL SERVICES RUNNING — {len(services)} active")
     print(f"  EventBus: subscribers={bus.subscriber_count}")
     print(f"  Interval: {settings.COOLDOWN_SECONDS}s")
+    if gemma_brain and gemma_brain._enabled:
+        risk_svc.set_gemma_brain_active(True)
+        print(f"  🧠 Gemma 4 Brain: ACTIVE (min_conf={settings.GEMMA_MIN_CONFIDENCE}%)")
     print(f"{'='*60}\n")
 
     # ── 7. Run Until Interrupted ──────────────────────────────────────

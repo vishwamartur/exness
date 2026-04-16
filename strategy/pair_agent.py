@@ -491,8 +491,9 @@ class PairAgent:
         mf_confidence = 0
         if self.mirofish is not None:
             try:
-                mf_bonus = self.mirofish.get_confluence_bonus(self.symbol, signal)
-                mf_direction, mf_confidence = self.mirofish.get_symbol_signal(self.symbol)
+                wrapped_data = {self.symbol: data_dict}
+                mf_bonus = self.mirofish.get_confluence_bonus(self.symbol, signal, wrapped_data)
+                mf_direction, mf_confidence = self.mirofish.get_symbol_signal(self.symbol, wrapped_data)
                 if mf_bonus > 0:
                     score = min(6, score + mf_bonus)
                     print(f"[{self.symbol}] MiroFish boost: +{mf_bonus} score (prediction={mf_direction}, confidence={mf_confidence}%)")

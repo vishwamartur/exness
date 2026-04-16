@@ -317,7 +317,8 @@ class HMMRegimeDetector:
             'NORMAL',
             'RANGING',
             'REVERSAL_BULL', 'REVERSAL_BEAR',
-            'VOLATILE_LOW'
+            'VOLATILE_LOW',
+            'VOLATILE_HIGH',  # Gold actively trades in high-vol regimes (news, geopolitical)
         ]
         return regime in good_regimes
 
@@ -338,7 +339,7 @@ class HMMRegimeDetector:
             'REVERSAL_BEAR': {'BUY': 3, 'SELL': 6},
             'VOLATILE_LOW': {'BUY': 5, 'SELL': 5},
             'RANGING': {'BUY': 3, 'SELL': 3},
-            'VOLATILE_HIGH': {'BUY': 0, 'SELL': 0}
+            'VOLATILE_HIGH': {'BUY': 3, 'SELL': 3}  # Tradeable but requires strong confluence
         }
 
         scores = regime_direction_match.get(regime, {'BUY': 5, 'SELL': 5})
@@ -350,7 +351,7 @@ class HMMRegimeDetector:
             'BREAKOUT_BULL': 'HMM: Bullish breakout state',
             'BREAKOUT_BEAR': 'HMM: Bearish breakout state',
             'RANGING': 'HMM: Low volatility / ranging state',
-            'VOLATILE_HIGH': 'HMM: Extreme volatility state — AVOID',
+            'VOLATILE_HIGH': 'HMM: High volatility — requires strong ML+BOS confluence',
             'VOLATILE_LOW': 'HMM: Compression state',
             'REVERSAL_BULL': 'HMM: Potential bullish reversal',
             'REVERSAL_BEAR': 'HMM: Potential bearish reversal',

@@ -369,9 +369,9 @@ def test_symbol_suffix_stripping():
     assert _strip_suffix("XAUUSDz") == "XAUUSD"
     assert _strip_suffix("USD") == "USD"  # Too short
     
-    print("  EURUSDm → EURUSD ✓")
-    print("  BTCUSDc → BTCUSD ✓")
-    print("  EURUSD → EURUSD ✓")
+    print("  EURUSDm -> EURUSD ✓")
+    print("  BTCUSDc -> BTCUSD ✓")
+    print("  EURUSD -> EURUSD ✓")
     print("  [PASS]: Suffix stripping works correctly")
 
 

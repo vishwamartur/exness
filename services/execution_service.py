@@ -66,10 +66,21 @@ class ExecutionService(BaseService):
             expiration_ts = int(dt.timestamp())
 
             # Determine order type and price
-            force_market = getattr(settings, 'FORCE_TEST_TRADES', False)
+            # Quick Scalp Mode always uses MARKET orders for instant fill
+            quick_scalp = getattr(settings, 'QUICK_SCALP_MODE', False)
+            force_market = getattr(settings, 'FORCE_TEST_TRADES', False) or (
+                quick_scalp and getattr(settings, 'QUICK_SCALP_MARKET_ORDER', True)
+            )
+
+            # Override lot size if quick scalp mode
+            if quick_scalp and not getattr(settings, 'FORCE_TEST_TRADES', False):
+                scalp_lot = getattr(settings, 'QUICK_SCALP_LOT_SIZE', 0.5)
+                max_lot = getattr(settings, 'QUICK_SCALP_MAX_LOT', 2.0)
+                lot = min(max(lot, scalp_lot), max_lot)
+                logger.info(f"[{symbol}] ⚡ QUICK SCALP MODE — Big Lot: {lot}")
 
             if force_market:
-                # Market order for testing
+                # Market order — instant fill (Quick Scalp or Test mode)
                 if direction == "BUY":
                     price = tick.ask
                     sl = price - trade.get("sl_distance", 0)
@@ -81,6 +92,7 @@ class ExecutionService(BaseService):
                     tp = price - trade.get("tp_distance", 0)
                     order_type = mt5.ORDER_TYPE_SELL
 
+                order_comment = "QScalp⚡" if quick_scalp else "EDA Market"
                 request = {
                     "action": mt5.TRADE_ACTION_DEAL,
                     "symbol": symbol,
@@ -91,7 +103,7 @@ class ExecutionService(BaseService):
                     "tp": tp,
                     "deviation": settings.DEVIATION,
                     "magic": 234000,
-                    "comment": "EDA Market",
+                    "comment": order_comment,
                     "type_time": mt5.ORDER_TIME_GTC,
                     "type_filling": mt5.ORDER_FILLING_IOC,
                 }

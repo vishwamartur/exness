@@ -60,10 +60,33 @@ class RiskService(BaseService):
         except Exception as e:
             logger.warning(f"PreTradeAnalyzer init failed: {e}")
 
-        self.bus.subscribe(EventTypes.TRADE_CANDIDATE, self._on_trade_candidate)
+        # Subscribe to Gemma-vetted candidates (post AI brain check)
+        # Falls back to raw TRADE_CANDIDATE if GemmaBrainService is not running
+        from services.gemma_brain_service import GEMMA_VETTED
+        self.bus.subscribe(GEMMA_VETTED, self._on_trade_candidate)
+        # Also listen to raw candidate as fallback (in case Gemma service not started)
+        self.bus.subscribe(EventTypes.TRADE_CANDIDATE, self._on_raw_candidate)
+
+        self._gemma_brain_active = False  # Set True once GemmaBrainService starts
+
+    def set_gemma_brain_active(self, active: bool):
+        """Called by GemmaBrainService to signal it is handling vetting."""
+        self._gemma_brain_active = active
+
+    async def _on_raw_candidate(self, event: Event):
+        """
+        Fallback: process raw TRADE_CANDIDATE only if GemmaBrainService is NOT active.
+        If Gemma brain is active, it re-emits as TRADE_CANDIDATE_VETTED. Double processing
+        would be wrong — so we skip here when Gemma is online.
+        """
+        if self._gemma_brain_active:
+            return  # Gemma service will emit TRADE_CANDIDATE_VETTED instead
+        # Fallback — pass directly to full risk evaluation
+        await self._on_trade_candidate(event)
 
     async def _on_trade_candidate(self, event: Event):
         """Evaluate a trade candidate through all risk checks."""
+
         candidate = event.payload
         symbol = candidate.get("symbol")
         direction = candidate.get("direction")

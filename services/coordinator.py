@@ -89,8 +89,11 @@ class CoordinatorService(BaseService):
         while self._running:
             await self._run_scan_cycle()
 
-            # Sleep for cooldown
-            sleep_time = max(1, settings.COOLDOWN_SECONDS)
+            # Quick Scalp Mode uses much shorter cooldown
+            if getattr(settings, 'QUICK_SCALP_MODE', False):
+                sleep_time = max(1, getattr(settings, 'QUICK_SCALP_COOLDOWN', 30))
+            else:
+                sleep_time = max(1, settings.COOLDOWN_SECONDS)
             logger.info(f"[SLEEP] Waiting {sleep_time}s...")
             await asyncio.sleep(sleep_time)
 
@@ -114,10 +117,15 @@ class CoordinatorService(BaseService):
             logger.info("[SCAN] Daily limit reached.")
             return
 
-        # Position limit
+        # Position limit (quick scalp mode allows more concurrent positions)
         positions = await self.gateway.get_all_positions()
-        if len(positions) >= settings.MAX_OPEN_POSITIONS:
-            logger.info(f"[SCAN] Max positions ({len(positions)})")
+        max_pos = (
+            getattr(settings, 'QUICK_SCALP_MAX_POSITIONS', 5)
+            if getattr(settings, 'QUICK_SCALP_MODE', False)
+            else settings.MAX_OPEN_POSITIONS
+        )
+        if len(positions) >= max_pos:
+            logger.info(f"[SCAN] Max positions ({len(positions)}/{max_pos})")
             return
 
         # News check
@@ -160,17 +168,21 @@ class CoordinatorService(BaseService):
         # 4. Publish account + position updates for dashboard
         await self._publish_dashboard_updates(positions)
 
-        # 5. Publish scan summary
+        # 5. Publish scan summary + print verbose rejection reasons
         scan_status = {}
         for symbol in settings.SYMBOLS:
             if symbol in self._quant_signals:
                 qs = self._quant_signals[symbol]
                 if qs.get("_is_candidate"):
-                    scan_status[symbol] = f"CANDIDATE ({qs.get('direction', '?')})"
+                    reason = f"CANDIDATE ({qs.get('direction', '?')})"
                 else:
-                    scan_status[symbol] = qs.get("_reject_reason", "Low Score")
+                    reason = qs.get("_reject_reason", "Low Score")
+                    # Print rejection reason clearly
+                    print(f"[SCAN] {symbol}: BLOCKED — {reason}")
+                scan_status[symbol] = reason
             else:
                 scan_status[symbol] = "No Signal"
+                print(f"[SCAN] {symbol}: No quant signal received (data pipeline issue?)")
 
         await self.emit(EventTypes.SCAN_SUMMARY, {
             "symbols": scan_status,
@@ -271,13 +283,21 @@ class CoordinatorService(BaseService):
                 qs["_reject_reason"] = "Circuit Breaker Tripped"
                 continue
 
-            # Skip XAUUSD normal candidates during active news window
-            # (NewsTradingService handles XAUUSD during news events)
+            # Skip XAUUSD normal candidates during active USD news window only
+            # (GBP/EUR events like BOE/ECB have indirect impact — don't block scalping)
             from utils.news_filter import _strip_suffix
             stripped = _strip_suffix(symbol).upper()
             if stripped in {s.upper() for s in self._news_window_symbols}:
-                qs["_reject_reason"] = "News Window Active (handled by NewsTradingService)"
-                continue
+                # Only suppress if the event currency directly affects this symbol (USD)
+                event_is_usd = any(
+                    info.get('currency', '') == 'USD'
+                    for info in self._news_event_info.values()
+                )
+                if event_is_usd:
+                    qs["_reject_reason"] = "USD News Window Active (NewsTradingService handling)"
+                    continue
+                # Non-USD news (BOE, ECB): allow normal scalping to proceed
+                print(f"[SCAN] {symbol}: Non-USD news window ({list(self._news_event_info.keys())}) — normal scalping allowed")
 
             direction = qs.get("direction", "NEUTRAL")
             score = qs.get("score", 0)
@@ -286,18 +306,23 @@ class CoordinatorService(BaseService):
             # Get strategy and flow modifiers
             strat = self._strategy_signals.get(symbol, {})
             strat_dir = strat.get("direction", "NEUTRAL")
+            strat_score = strat.get("strategy_score", 0)
             
             flow = self._flow_data.get(symbol, {})
             flow_dir = flow.get("flow_direction", "NEUTRAL")
 
             # Basic deterministic confluence
-            if strat_dir != "NEUTRAL":
+            if strat_dir != "NEUTRAL" and strat_score > 0:
                 if strat_dir == direction:
-                    score += strat.get("strategy_score", 0)
+                    score += strat_score
                 elif hasattr(settings, 'BOS_STRICT_MODE') and getattr(settings, 'BOS_STRICT_MODE', True):
-                    # Blocking if BOS disagrees in strict mode
-                    qs["_reject_reason"] = f"BOS Strategy Conflict ({strat_dir})"
-                    continue
+                    # Only block if BOS has meaningful confidence (score >= 2)
+                    if strat_score >= 2:
+                        print(f"[SCAN] {symbol}: BOS conflict {strat_dir} vs ML {direction} (BOS score={strat_score}) — blocking")
+                        qs["_reject_reason"] = f"BOS Strategy Conflict ({strat_dir} vs {direction})"
+                        continue
+                    else:
+                        print(f"[SCAN] {symbol}: BOS low-confidence conflict {strat_dir} vs ML {direction} (score={strat_score}) — allowing ML")
                     
             # Flow confirmation
             if flow_dir != "NEUTRAL" and flow_dir == direction:
@@ -312,17 +337,20 @@ class CoordinatorService(BaseService):
                 qs["_reject_reason"] = f"Bad Regime: {regime_type}"
                 continue
 
-            # Regime-adaptive min confluence
-            regime_key = "RANGING"
-            if regime_type in ("TRENDING", "BULL_TREND", "BEAR_TREND"):
-                regime_key = "TRENDING"
-            elif regime_type in ("VOLATILE", "VOLATILE_HIGH"):
-                regime_key = "VOLATILE"
+            # Regime-adaptive min confluence (override in Quick Scalp Mode)
+            if getattr(settings, 'QUICK_SCALP_MODE', False):
+                min_confluence = getattr(settings, 'QUICK_SCALP_MIN_CONFLUENCE', 1)
+            else:
+                regime_key = "RANGING"
+                if regime_type in ("TRENDING", "BULL_TREND", "BEAR_TREND"):
+                    regime_key = "TRENDING"
+                elif regime_type in ("VOLATILE", "VOLATILE_HIGH"):
+                    regime_key = "VOLATILE"
 
-            regime_params = getattr(settings, 'REGIME_PARAMS', {})
-            rp = regime_params.get(regime_key, {})
-            min_confluence = int(rp.get('MIN_CONFLUENCE_SCORE',
-                                       settings.MIN_CONFLUENCE_SCORE))
+                regime_params = getattr(settings, 'REGIME_PARAMS', {})
+                rp = regime_params.get(regime_key, {})
+                min_confluence = int(rp.get('MIN_CONFLUENCE_SCORE',
+                                           settings.MIN_CONFLUENCE_SCORE))
 
             if score < min_confluence:
                 qs["_reject_reason"] = f"Low Score ({score} < {min_confluence})"
@@ -332,7 +360,14 @@ class CoordinatorService(BaseService):
             prob = ml_prob
             if direction == "SELL":
                 prob = 1.0 - prob
-            if score < 5 and prob < settings.RF_PROB_THRESHOLD:
+
+            # Quick Scalp Mode — lower ML bar
+            if getattr(settings, 'QUICK_SCALP_MODE', False):
+                min_ml_prob = getattr(settings, 'QUICK_SCALP_MIN_ML_PROB', 0.50)
+            else:
+                min_ml_prob = settings.RF_PROB_THRESHOLD
+
+            if score < 5 and prob < min_ml_prob:
                 qs["_reject_reason"] = f"Low ML ({prob:.2f})"
                 continue
 
@@ -344,16 +379,27 @@ class CoordinatorService(BaseService):
                 continue
 
             # Calculate SL/TP
-            sl_dist = atr * settings.ATR_SL_MULTIPLIER
-            if getattr(settings, 'SMART_EXIT_ENABLED', False):
+            if getattr(settings, 'QUICK_SCALP_MODE', False):
+                # Quick scalp: tight SL, book profit fast
+                sl_dist = atr * getattr(settings, 'QUICK_SCALP_SL_ATR', 0.5)
+                tp_dist = atr * getattr(settings, 'QUICK_SCALP_TP_ATR', 1.0)
+                print(f"[QUICK SCALP] ⚡ {symbol}: SL={sl_dist:.4f} TP={tp_dist:.4f} ATR={atr:.4f}")
+            elif getattr(settings, 'SMART_EXIT_ENABLED', False):
+                sl_dist = atr * settings.ATR_SL_MULTIPLIER
                 tp_dist = atr * getattr(settings, 'TP_SAFETY_ATR', 10.0)
             else:
+                sl_dist = atr * settings.ATR_SL_MULTIPLIER
                 tp_dist = atr * settings.ATR_TP_MULTIPLIER
 
             # R:R check
             if sl_dist > 0:
+                min_rr = (
+                    getattr(settings, 'QUICK_SCALP_MIN_RR', 1.2)
+                    if getattr(settings, 'QUICK_SCALP_MODE', False)
+                    else settings.MIN_RISK_REWARD_RATIO
+                )
                 rr = tp_dist / sl_dist
-                if rr < settings.MIN_RISK_REWARD_RATIO:
+                if rr < min_rr:
                     qs["_reject_reason"] = f"Low R:R ({rr:.2f})"
                     continue
 
