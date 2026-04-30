@@ -27,6 +27,20 @@ class JournalService(BaseService):
 
     async def _setup(self):
         self.bus.subscribe(EventTypes.TRADE_EXECUTED, self._on_trade_executed)
+        self.bus.subscribe(EventTypes.POSITION_CLOSED, self._on_position_closed)
+
+    async def _on_position_closed(self, event: Event):
+        p = event.payload
+        try:
+            ticket = p.get("ticket")
+            exit_price = p.get("exit_price", 0.0)
+            profit = p.get("profit", 0.0)
+            
+            if ticket:
+                self.journal.log_exit(ticket, exit_price, profit)
+                logger.info(f"[{p.get('symbol', 'UNKNOWN')}] Trade exit logged: #{ticket} (Profit: ${profit:.2f})")
+        except Exception as e:
+            logger.error(f"Journal exit log failed: {e}")
 
     async def _on_trade_executed(self, event: Event):
         p = event.payload

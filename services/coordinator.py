@@ -1,21 +1,20 @@
-"""
-CoordinatorService — The thin orchestrator that replaces InstitutionalStrategy.
+﻿"""
+CoordinatorService â€” Session-Regime-Aware Orchestrator.
 
-Responsibilities:
-  1. Periodically triggers SCAN_START events
-  2. Aggregates QUANT_SIGNAL + REGIME_UPDATE + SENTIMENT_UPDATE per symbol
-  3. Runs PairAgent-style candidate evaluation
-  4. Publishes TRADE_CANDIDATE for RiskService to approve
-  5. Publishes ACCOUNT_UPDATE + POSITION_UPDATE for dashboard
+Consumes session regime signals and liquidity sweep signals instead
+of generic ML/confluence scoring. Applies macro filter as a trade gate.
 
-Replaces: InstitutionalStrategy.run_scan_loop() + PairAgent._analyze() decision logic
+Event Flow:
+  SCAN_START â†’ MARKET_DATA_READY â†’ SESSION_REGIME_UPDATE + MACRO_FILTER_UPDATE
+  â†’ SESSION_TRADE_SIGNAL / SWEEP_TRADE_SIGNAL â†’ TRADE_CANDIDATE
+  â†’ TRADE_APPROVED â†’ TRADE_EXECUTED
 """
 
 import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict
 
 import MetaTrader5 as mt5
 
@@ -24,49 +23,36 @@ from core.base_service import BaseService
 from core.mt5_gateway import MT5Gateway
 from config import settings
 from utils.news_filter import is_news_blackout, get_active_events
-from analysis.pattern_memory import get_pattern_memory
-
 
 logger = logging.getLogger("CoordinatorService")
 
 
 class CoordinatorService(BaseService):
     """
-    Orchestrates scan cycles. Collects analysis results from other services
-    and produces TRADE_CANDIDATE events.
+    Session-regime-aware orchestrator. Collects session strategy signals
+    and liquidity sweep signals, applies macro filter, and produces
+    TRADE_CANDIDATE events.
     """
 
     def __init__(self, event_bus: EventBus, gateway: MT5Gateway):
         super().__init__(event_bus)
         self.gateway = gateway
 
-        # Per-symbol aggregation buffers (filled by event handlers)
-        self._quant_signals: Dict[str, dict] = {}
-        self._regime_data: Dict[str, dict] = {}
-        self._sentiment_data: Dict[str, dict] = {}
-        self._strategy_signals: Dict[str, dict] = {}
-        self._flow_data: Dict[str, dict] = {}
-        self._circuit_breakers: Dict[str, bool] = {}
+        # Signal aggregation buffers (cleared each cycle)
+        self._session_signals: Dict[str, dict] = {}
+        self._sweep_signals: Dict[str, dict] = {}
+        self._macro_filter: dict = {}
+        self._session_regime: dict = {}
 
-        # News trading state
-        self._news_window_symbols: set = set()  # Symbols in active news window
-        self._news_event_info: Dict[str, dict] = {}  # Current news event details
-
-        # Pattern memory
-        self.pattern_memory = None
-        try:
-            self.pattern_memory = get_pattern_memory()
-        except Exception as e:
-            logger.warning(f"Pattern memory unavailable: {e}")
+        # News trading state (preserved from v3)
+        self._news_window_symbols: set = set()
+        self._news_event_info: Dict[str, dict] = {}
 
         # Scan state
         self._scan_count = 0
         self._daily_trade_count = 0
         self._last_reset_date = datetime.now(timezone.utc).date()
         self._last_trade_time: Dict[str, float] = {}
-
-        # Track how many data-ready events we've received this cycle
-        self._data_ready_count = 0
         self._expected_symbols = 0
 
     @property
@@ -74,26 +60,20 @@ class CoordinatorService(BaseService):
         return "CoordinatorService"
 
     async def _setup(self):
-        # Subscribe to analysis results
-        self.bus.subscribe(EventTypes.QUANT_SIGNAL, self._on_quant_signal)
-        self.bus.subscribe(EventTypes.REGIME_UPDATE, self._on_regime_update)
-        self.bus.subscribe(EventTypes.SENTIMENT_UPDATE, self._on_sentiment)
-        self.bus.subscribe("STRATEGY_SIGNAL", self._on_strategy_signal)
-        self.bus.subscribe("FLOW_UPDATE", self._on_flow_update)
-        self.bus.subscribe("CIRCUIT_BREAKER_UPDATE", self._on_circuit_breaker)
+        # Session regime signals
+        self.bus.subscribe(EventTypes.SESSION_TRADE_SIGNAL, self._on_session_signal)
+        self.bus.subscribe(EventTypes.SWEEP_TRADE_SIGNAL, self._on_sweep_signal)
+        self.bus.subscribe(EventTypes.MACRO_FILTER_UPDATE, self._on_macro_filter)
+        self.bus.subscribe(EventTypes.SESSION_REGIME_UPDATE, self._on_session_regime)
+        self.bus.subscribe(EventTypes.FLAT_ALL_POSITIONS, self._on_flat_all)
         self.bus.subscribe(EventTypes.TRADE_EXECUTED, self._on_trade_executed)
         self.bus.subscribe(EventTypes.NEWS_TRADE_SIGNAL, self._on_news_trade_signal)
 
     async def _run_loop(self):
-        """Main scan loop — runs periodically."""
+        """Main scan loop."""
         while self._running:
             await self._run_scan_cycle()
-
-            # Quick Scalp Mode uses much shorter cooldown
-            if getattr(settings, 'QUICK_SCALP_MODE', False):
-                sleep_time = max(1, getattr(settings, 'QUICK_SCALP_COOLDOWN', 30))
-            else:
-                sleep_time = max(1, settings.COOLDOWN_SECONDS)
+            sleep_time = max(1, settings.COOLDOWN_SECONDS)
             logger.info(f"[SLEEP] Waiting {sleep_time}s...")
             await asyncio.sleep(sleep_time)
 
@@ -101,31 +81,21 @@ class CoordinatorService(BaseService):
         """Execute one full scan cycle."""
         self._scan_count += 1
 
-        # Daily reset check
+        # Daily reset
         today = datetime.now(timezone.utc).date()
         if today != self._last_reset_date:
             self._daily_trade_count = 0
             self._last_reset_date = today
 
-        # Session filter
-        if not self._is_trading_session():
-            logger.info("[SCAN] Outside trading session.")
-            return
-
         # Daily limit
         if self._daily_trade_count >= settings.MAX_DAILY_TRADES:
-            logger.info("[SCAN] Daily limit reached.")
+            logger.info("[SCAN] Daily trade limit reached.")
             return
 
-        # Position limit (quick scalp mode allows more concurrent positions)
+        # Position limit
         positions = await self.gateway.get_all_positions()
-        max_pos = (
-            getattr(settings, 'QUICK_SCALP_MAX_POSITIONS', 5)
-            if getattr(settings, 'QUICK_SCALP_MODE', False)
-            else settings.MAX_OPEN_POSITIONS
-        )
-        if len(positions) >= max_pos:
-            logger.info(f"[SCAN] Max positions ({len(positions)}/{max_pos})")
+        if len(positions) >= settings.MAX_OPEN_POSITIONS:
+            logger.info(f"[SCAN] Max positions ({len(positions)}/{settings.MAX_OPEN_POSITIONS})")
             return
 
         # News check
@@ -133,333 +103,189 @@ class CoordinatorService(BaseService):
         if active_news:
             print(f"[NEWS] {', '.join(active_news)}")
 
-        # Show news trading status
-        if self._news_window_symbols:
-            print(f"[NEWS TRADE] Active news window for: {', '.join(self._news_window_symbols)}")
-
-        # Clear aggregation buffers for new cycle
-        self._quant_signals.clear()
-        self._regime_data.clear()
-        self._sentiment_data.clear()
-        self._strategy_signals.clear()
-        self._flow_data.clear()
-        self._data_ready_count = 0
+        # Clear aggregation buffers
+        self._session_signals.clear()
+        self._sweep_signals.clear()
         self._expected_symbols = len(settings.SYMBOLS)
 
+        # Get current session for display
+        session = self._session_regime.get("session", "UNKNOWN")
+        regime = self._session_regime.get("regime", "UNKNOWN")
+
         print(f"\n{'='*60}")
-        print(f"  SCAN CYCLE #{self._scan_count} — {len(settings.SYMBOLS)} symbols")
+        print(f"  SCAN #{self._scan_count} | {session} session | {regime} regime")
+        print(f"  Macro: {self._macro_filter.get('regime', 'NEUTRAL')} | "
+              f"DXY={self._macro_filter.get('dxy', 0):.2f} | "
+              f"VIX={self._macro_filter.get('vix', 0):.2f}")
         print(f"{'='*60}")
 
-        # 1. Trigger data fetch + analysis pipeline
+        # 1. Trigger data pipeline
         await self.emit(EventTypes.SCAN_START, {
             "count": len(settings.SYMBOLS),
             "cycle": self._scan_count,
+            "session": session,
+            "regime": regime,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
-        # 2. Wait for analysis pipeline to complete
-        # Services will publish QUANT_SIGNAL, REGIME_UPDATE, etc.
-        # We wait up to 30 seconds for all signals to arrive
+        # 2. Wait for signals
         await self._wait_for_signals(timeout=30)
 
-        # 3. Evaluate candidates from collected signals
+        # 3. Evaluate candidates
         candidates = self._evaluate_candidates()
 
-        # 4. Publish account + position updates for dashboard
+        # 4. Dashboard updates
         await self._publish_dashboard_updates(positions)
 
-        # 5. Publish scan summary + print verbose rejection reasons
-        scan_status = {}
-        for symbol in settings.SYMBOLS:
-            if symbol in self._quant_signals:
-                qs = self._quant_signals[symbol]
-                if qs.get("_is_candidate"):
-                    reason = f"CANDIDATE ({qs.get('direction', '?')})"
-                else:
-                    reason = qs.get("_reject_reason", "Low Score")
-                    # Print rejection reason clearly
-                    print(f"[SCAN] {symbol}: BLOCKED — {reason}")
-                scan_status[symbol] = reason
-            else:
-                scan_status[symbol] = "No Signal"
-                print(f"[SCAN] {symbol}: No quant signal received (data pipeline issue?)")
-
+        # 5. Scan summary
         await self.emit(EventTypes.SCAN_SUMMARY, {
-            "symbols": scan_status,
+            "symbols": {s: "Active" for s in settings.SYMBOLS},
             "count": len(settings.SYMBOLS),
             "candidates": len(candidates),
+            "session": session,
+            "regime": regime,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
         # 6. Submit best candidate
         if candidates:
-            candidates.sort(
-                key=lambda x: (x.get("score", 0), x.get("ml_prob", 0)),
-                reverse=True,
-            )
+            candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
             self._print_candidates(candidates)
 
             best = candidates[0]
-            
-            # Pattern Memory RAG check dynamically just for the best candidate
-            pattern_info = {"outcome": "UNKNOWN"}
-            if self.pattern_memory:
-                try:
-                    pattern_id = f"{best['symbol']}_{best['direction']}_{int(datetime.now().timestamp())}"
-                    from utils.async_utils import run_in_executor
-                    # Run embedding comparison in thread
-                    mem_result = await run_in_executor(
-                        self.pattern_memory.evaluate_candidate, 
-                        best['features'], 
-                        best['direction']
-                    )
-                    pattern_info = mem_result
-                    logger.debug(f"Pattern Memory info: {mem_result}")
-
-                    # If RAG strongly suggests loss based on historical embedding match, block
-                    if getattr(settings, 'USE_PATTERN_MEMORY', False):
-                        if mem_result.get('recommendation') == 'AVOID' and mem_result.get('confidence', 0) > 0.8:
-                            logger.warning(f"[{best['symbol']}] Pattern Memory strongly suggests AVOID. Skipping.")
-                            # You could emit TRADE_REJECTED here or just ignore candidate
-                            print("[SCAN] Best candidate rejected by Pattern Memory.")
-                            return
-                except Exception as e:
-                    logger.debug(f"Pattern Memory error: {e}")
-                    
-            best["pattern_memory"] = pattern_info
-
-            logger.info(f">>> CANDIDATE: {best['symbol']} {best['direction']}")
+            logger.info(f">>> CANDIDATE: {best['symbol']} {best['direction']} "
+                        f"(score={best['score']}, {best.get('reason', '')})")
             await self.emit(EventTypes.TRADE_CANDIDATE, best)
         else:
-            print("[SCAN] No candidates found.")
+            print(f"[SCAN] No candidates â€” {regime} regime active")
 
     async def _wait_for_signals(self, timeout: int = 30):
-        """Wait for quant signals to arrive from analysis services."""
+        """Wait for session/sweep signals to arrive."""
         start = time.time()
-        target = max(1, self._expected_symbols)
-
         while time.time() - start < timeout:
-            if len(self._quant_signals) >= target:
+            total = len(self._session_signals) + len(self._sweep_signals)
+            if total > 0:
                 break
             await asyncio.sleep(0.5)
 
-        elapsed = time.time() - start
-        received = len(self._quant_signals)
-        logger.debug(f"Received {received}/{target} signals in {elapsed:.1f}s")
-
     def _evaluate_candidates(self) -> list:
-        """Evaluate collected signals to produce trade candidates."""
+        """Evaluate session + sweep signals to produce trade candidates."""
         candidates = []
 
-        # --- FORCED TESTING BYPASS ---
-        if getattr(settings, 'FORCE_TEST_TRADES', False) and self._quant_signals:
-            symbol = list(self._quant_signals.keys())[0]
-            try:
-                sym_info = mt5.symbol_info(symbol)
-                point = sym_info.point if sym_info else 0.01
-            except:
-                point = 0.01
-
-            return [{
-                'symbol': symbol,
-                'direction': 'BUY',
-                'score': 10,
-                'ml_prob': 1.0,
-                'ensemble_score': 10,
-                'regime': 'TRENDING',
-                'regime_type': 'TRENDING',
-                'sl_distance': point * 200,
-                'tp_distance': point * 400,
-                'scaling_factor': 1.0,
-                'emotion_state': 'NEUTRAL',
-                'emotion_score': 0.5,
-                'details': {'FORCED': 'Test mode active'},
-                'features': {}
-            }]
-
-        for symbol, qs in self._quant_signals.items():
-            # Check Circuit Breakers
-            if self._circuit_breakers.get(symbol, False):
-                qs["_reject_reason"] = "Circuit Breaker Tripped"
+        # Process session strategy signals
+        for symbol, sig in self._session_signals.items():
+            direction = sig.get("direction", "NEUTRAL")
+            if direction == "NEUTRAL":
+                print(f"[SCAN] {symbol}: No session setup")
                 continue
 
-            # Skip XAUUSD normal candidates during active USD news window only
-            # (GBP/EUR events like BOE/ECB have indirect impact — don't block scalping)
-            from utils.news_filter import _strip_suffix
-            stripped = _strip_suffix(symbol).upper()
-            if stripped in {s.upper() for s in self._news_window_symbols}:
-                # Only suppress if the event currency directly affects this symbol (USD)
-                event_is_usd = any(
-                    info.get('currency', '') == 'USD'
-                    for info in self._news_event_info.values()
-                )
-                if event_is_usd:
-                    qs["_reject_reason"] = "USD News Window Active (NewsTradingService handling)"
-                    continue
-                # Non-USD news (BOE, ECB): allow normal scalping to proceed
-                print(f"[SCAN] {symbol}: Non-USD news window ({list(self._news_event_info.keys())}) — normal scalping allowed")
-
-            direction = qs.get("direction", "NEUTRAL")
-            score = qs.get("score", 0)
-            ml_prob = qs.get("ml_prob", 0.5)
-
-            # Get strategy and flow modifiers
-            strat = self._strategy_signals.get(symbol, {})
-            strat_dir = strat.get("direction", "NEUTRAL")
-            strat_score = strat.get("strategy_score", 0)
-            
-            flow = self._flow_data.get(symbol, {})
-            flow_dir = flow.get("flow_direction", "NEUTRAL")
-
-            # Basic deterministic confluence
-            if strat_dir != "NEUTRAL" and strat_score > 0:
-                if strat_dir == direction:
-                    score += strat_score
-                elif hasattr(settings, 'BOS_STRICT_MODE') and getattr(settings, 'BOS_STRICT_MODE', True):
-                    # Only block if BOS has meaningful confidence (score >= 2)
-                    if strat_score >= 2:
-                        print(f"[SCAN] {symbol}: BOS conflict {strat_dir} vs ML {direction} (BOS score={strat_score}) — blocking")
-                        qs["_reject_reason"] = f"BOS Strategy Conflict ({strat_dir} vs {direction})"
-                        continue
-                    else:
-                        print(f"[SCAN] {symbol}: BOS low-confidence conflict {strat_dir} vs ML {direction} (score={strat_score}) — allowing ML")
-                    
-            # Flow confirmation
-            if flow_dir != "NEUTRAL" and flow_dir == direction:
-                score += flow.get("flow_score", 0)
-
-            # Get regime
-            regime = self._regime_data.get(symbol, {})
-            regime_type = regime.get("regime_type", "UNKNOWN")
-            is_tradeable = regime.get("is_tradeable", True)
-
-            if not is_tradeable:
-                qs["_reject_reason"] = f"Bad Regime: {regime_type}"
+            score = sig.get("score", 0)
+            if score < settings.MIN_CONFLUENCE_SCORE:
+                print(f"[SCAN] {symbol}: Low score ({score} < {settings.MIN_CONFLUENCE_SCORE})")
                 continue
 
-            # Regime-adaptive min confluence (override in Quick Scalp Mode)
-            if getattr(settings, 'QUICK_SCALP_MODE', False):
-                min_confluence = getattr(settings, 'QUICK_SCALP_MIN_CONFLUENCE', 1)
-            else:
-                regime_key = "RANGING"
-                if regime_type in ("TRENDING", "BULL_TREND", "BEAR_TREND"):
-                    regime_key = "TRENDING"
-                elif regime_type in ("VOLATILE", "VOLATILE_HIGH"):
-                    regime_key = "VOLATILE"
-
-                regime_params = getattr(settings, 'REGIME_PARAMS', {})
-                rp = regime_params.get(regime_key, {})
-                min_confluence = int(rp.get('MIN_CONFLUENCE_SCORE',
-                                           settings.MIN_CONFLUENCE_SCORE))
-
-            if score < min_confluence:
-                qs["_reject_reason"] = f"Low Score ({score} < {min_confluence})"
+            # Macro filter already applied in SessionStrategyService
+            # but double-check direction is still allowed
+            if not self._check_macro_direction(direction):
+                print(f"[SCAN] {symbol}: Macro filter blocks {direction}")
                 continue
 
-            # ML prob filter
-            prob = ml_prob
-            if direction == "SELL":
-                prob = 1.0 - prob
-
-            # Quick Scalp Mode — lower ML bar
-            if getattr(settings, 'QUICK_SCALP_MODE', False):
-                min_ml_prob = getattr(settings, 'QUICK_SCALP_MIN_ML_PROB', 0.50)
-            else:
-                min_ml_prob = settings.RF_PROB_THRESHOLD
-
-            if score < 5 and prob < min_ml_prob:
-                qs["_reject_reason"] = f"Low ML ({prob:.2f})"
+            # Cooldown check
+            last = self._last_trade_time.get(symbol, 0)
+            if time.time() - last < settings.COOLDOWN_SECONDS:
+                print(f"[SCAN] {symbol}: Cooldown active")
                 continue
 
-            # Get features for ATR-based SL/TP
-            features = qs.get("features", {})
-            atr = features.get("atr", 0)
-            if atr <= 0:
-                qs["_reject_reason"] = "No ATR"
-                continue
-
-            # Calculate SL/TP
-            if getattr(settings, 'QUICK_SCALP_MODE', False):
-                # Quick scalp: tight SL, book profit fast
-                sl_dist = atr * getattr(settings, 'QUICK_SCALP_SL_ATR', 0.5)
-                tp_dist = atr * getattr(settings, 'QUICK_SCALP_TP_ATR', 1.0)
-                print(f"[QUICK SCALP] ⚡ {symbol}: SL={sl_dist:.4f} TP={tp_dist:.4f} ATR={atr:.4f}")
-            elif getattr(settings, 'SMART_EXIT_ENABLED', False):
-                sl_dist = atr * settings.ATR_SL_MULTIPLIER
-                tp_dist = atr * getattr(settings, 'TP_SAFETY_ATR', 10.0)
-            else:
-                sl_dist = atr * settings.ATR_SL_MULTIPLIER
-                tp_dist = atr * settings.ATR_TP_MULTIPLIER
-
-            # R:R check
-            if sl_dist > 0:
-                min_rr = (
-                    getattr(settings, 'QUICK_SCALP_MIN_RR', 1.2)
-                    if getattr(settings, 'QUICK_SCALP_MODE', False)
-                    else settings.MIN_RISK_REWARD_RATIO
-                )
-                rr = tp_dist / sl_dist
-                if rr < min_rr:
-                    qs["_reject_reason"] = f"Low R:R ({rr:.2f})"
-                    continue
-
-            # Get sentiment
-            sentiment = self._sentiment_data.get(symbol, {})
-
-            # Build candidate
-            candidate = {
+            candidates.append({
                 "symbol": symbol,
                 "direction": direction,
                 "score": score,
-                "ml_prob": ml_prob,
-                "ensemble_score": qs.get("ensemble_score", 0),
-                "regime": regime.get("regime", "UNKNOWN"),
-                "regime_type": regime_type,
-                "sl_distance": sl_dist,
-                "tp_distance": tp_dist,
+                "sl_distance": sig.get("sl_distance", 0),
+                "tp_distance": sig.get("tp_distance", 0),
                 "scaling_factor": 1.0,
-                "emotion_state": sentiment.get("emotion_state", "NEUTRAL"),
-                "emotion_score": sentiment.get("emotion_score", 0.5),
-                "details": qs.get("details", {}),
-                "features": features,
-            }
+                "macro_size_factor": sig.get("macro_size_factor", 1.0),
+                "emotion_state": "NEUTRAL",
+                "emotion_score": 0.5,
+                "ml_prob": 0.5,  # Not used in session regime
+                "details": {"session": sig.get("session", ""),
+                            "regime": sig.get("regime", ""),
+                            "reason": sig.get("reason", "")},
+                "features": {"atr": sig.get("atr", 0),
+                             "rsi": sig.get("rsi", 0)},
+                "reason": sig.get("reason", ""),
+            })
 
-            qs["_is_candidate"] = True
-            candidates.append(candidate)
+        # Process liquidity sweep signals (higher priority â€” score 9)
+        for symbol, sig in self._sweep_signals.items():
+            direction = sig.get("direction", "NEUTRAL")
+            if direction == "NEUTRAL":
+                continue
+
+            if not self._check_macro_direction(direction):
+                continue
+
+            candidates.append({
+                "symbol": symbol,
+                "direction": direction,
+                "score": sig.get("score", 9),
+                "sl_distance": sig.get("sl_distance", 0),
+                "tp_distance": sig.get("tp_distance", 0),
+                "scaling_factor": 1.0,
+                "macro_size_factor": self._macro_filter.get("size_factor", 1.0),
+                "emotion_state": "NEUTRAL",
+                "emotion_score": 0.5,
+                "ml_prob": 0.5,
+                "details": {"sweep_type": sig.get("sweep_type", ""),
+                            "sweep_level": sig.get("sweep_level", 0),
+                            "reason": sig.get("reason", "")},
+                "features": {"atr": sig.get("atr", 0),
+                             "rsi": sig.get("rsi", 0)},
+                "reason": sig.get("reason", ""),
+            })
 
         return candidates
 
-    # ─── Event Handlers ───────────────────────────────────────────────────
+    def _check_macro_direction(self, direction: str) -> bool:
+        """Check if macro filter allows this direction."""
+        if not self._macro_filter:
+            return True
+        allowed = self._macro_filter.get("allowed_directions", ["BUY", "SELL"])
+        return direction in allowed
 
-    async def _on_quant_signal(self, event: Event):
+    # â”€â”€â”€ Event Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    async def _on_session_signal(self, event: Event):
         symbol = event.payload.get("symbol")
         if symbol:
-            self._quant_signals[symbol] = event.payload
+            self._session_signals[symbol] = event.payload
 
-    async def _on_regime_update(self, event: Event):
+    async def _on_sweep_signal(self, event: Event):
         symbol = event.payload.get("symbol")
         if symbol:
-            self._regime_data[symbol] = event.payload
+            self._sweep_signals[symbol] = event.payload
 
-    async def _on_sentiment(self, event: Event):
-        symbol = event.payload.get("symbol")
-        if symbol:
-            self._sentiment_data[symbol] = event.payload
+    async def _on_macro_filter(self, event: Event):
+        self._macro_filter = event.payload
 
-    async def _on_strategy_signal(self, event: Event):
-        symbol = event.payload.get("symbol")
-        if symbol:
-            self._strategy_signals[symbol] = event.payload
+    async def _on_session_regime(self, event: Event):
+        self._session_regime = event.payload
 
-    async def _on_flow_update(self, event: Event):
-        symbol = event.payload.get("symbol")
-        if symbol:
-            self._flow_data[symbol] = event.payload
-
-    async def _on_circuit_breaker(self, event: Event):
-        symbol = event.payload.get("symbol")
-        if symbol:
-            self._circuit_breakers[symbol] = event.payload.get("tripped", False)
+    async def _on_flat_all(self, event: Event):
+        """NY Afternoon â€” flatten all open positions."""
+        try:
+            positions = await self.gateway.get_all_positions()
+            if positions:
+                logger.warning(
+                    f"[FLAT ALL] NY Afternoon â€” closing {len(positions)} positions"
+                )
+                for pos in positions:
+                    try:
+                        await self.gateway.close_position(pos.ticket)
+                        logger.info(f"[FLAT] Closed #{pos.ticket} {pos.symbol}")
+                    except Exception as e:
+                        logger.error(f"[FLAT] Failed to close #{pos.ticket}: {e}")
+        except Exception as e:
+            logger.error(f"[FLAT ALL] Error: {e}")
 
     async def _on_trade_executed(self, event: Event):
         self._daily_trade_count += 1
@@ -467,40 +293,26 @@ class CoordinatorService(BaseService):
         self._last_trade_time[symbol] = time.time()
 
     async def _on_news_trade_signal(self, event: Event):
-        """Track active news trading windows to suppress normal candidates."""
+        """Track active news trading windows."""
         symbols = event.payload.get("symbols", [])
         event_key = event.payload.get("event_key", "")
-        event_name = event.payload.get("event_name", "")
-        minutes_until = event.payload.get("minutes_until", 0)
-
         for sym in symbols:
             from utils.news_filter import _strip_suffix
             self._news_window_symbols.add(_strip_suffix(sym).upper())
-
         self._news_event_info[event_key] = event.payload
-
-        logger.info(
-            f"[NEWS] Suppressing normal scalping for {', '.join(symbols)} — "
-            f"{event_name} in {minutes_until:.0f}min"
-        )
-
-        # Auto-clear news window after the event passes (30 min after event time)
         asyncio.create_task(self._clear_news_window_later(symbols, delay_minutes=45))
 
     async def _clear_news_window_later(self, symbols, delay_minutes=45):
-        """Clear the news window suppression after the event passes."""
         await asyncio.sleep(delay_minutes * 60)
         for sym in symbols:
             from utils.news_filter import _strip_suffix
             self._news_window_symbols.discard(_strip_suffix(sym).upper())
-        logger.info(f"[NEWS] News window cleared for {', '.join(symbols)}")
 
-    # ─── Dashboard Updates ────────────────────────────────────────────────
+    # â”€â”€â”€ Dashboard Updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _publish_dashboard_updates(self, positions):
         """Publish account + position info for the dashboard."""
         try:
-            # Positions
             pos_list = []
             for p in positions:
                 pos_list.append({
@@ -520,7 +332,6 @@ class CoordinatorService(BaseService):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
-            # Account
             acct = await self.gateway.get_account_info()
             if acct:
                 await self.emit(EventTypes.ACCOUNT_UPDATE, {
@@ -537,23 +348,15 @@ class CoordinatorService(BaseService):
         except Exception as e:
             logger.debug(f"Dashboard update error: {e}")
 
-    # ─── Helpers ──────────────────────────────────────────────────────────
-
-    def _is_trading_session(self) -> bool:
-        if not settings.SESSION_FILTER:
-            return True
-        now = datetime.now(timezone.utc)
-        current_time = now.hour + now.minute / 60.0
-        for _, times in settings.TRADE_SESSIONS.items():
-            if times['start'] <= current_time < times['end']:
-                return True
-        return False
+    # â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _print_candidates(self, candidates):
         print(f"\n{'-'*60}")
-        print(f"  {'Symbol':>10} | {'Dir':>4} | Sc | ML")
+        print(f"  {'Symbol':>10} | {'Dir':>4} | Sc | Reason")
         print(f"{'-'*60}")
         for c in candidates[:5]:
             sym = c['symbol']
             d = c['direction']
-            print(f"    {sym:>10} | {d:>4} | {c['score']} | {c['ml_prob']:.2f}")
+            reason = c.get('reason', '')[:40]
+            print(f"    {sym:>10} | {d:>4} | {c['score']} | {reason}")
+

@@ -1,17 +1,20 @@
 """
-WebSocket Stream Server (FastAPI) — Upgraded for React Dashboard
+WebSocket Stream Server (FastAPI) - Upgraded for React Dashboard
 Provides real-time WebSocket feed + REST endpoints for the React dashboard.
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from datetime import date, datetime, timezone
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 import uvicorn
 import asyncio
 import json
 import threading
 import logging
-from datetime import datetime, timezone
 
 from utils.trade_journal import TradeJournal
+from strategy.power_of_stocks_backtester import BacktestSettings, run_backtest, search_symbols
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("StreamServer")
@@ -34,6 +37,58 @@ _state = {
     "recent_trades": [],   # last 50 trade executions
     "events": [],          # last 200 raw events
 }
+
+
+class BacktestRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    strategy: str = Field(default="ema5_breakout")
+    start_date: date
+    end_date: date
+    timeframe: str = Field(default="M5")
+    timezone_name: str = Field(default="Asia/Kolkata")
+    reward_risk: float = Field(default=3.0, gt=0)
+    entry_window_bars: int = Field(default=3, ge=1, le=20)
+    initial_capital: float = Field(default=100000.0, gt=0)
+    risk_per_trade: float = Field(default=1000.0, gt=0)
+    session_start: str | None = Field(default="09:20")
+    session_end: str | None = Field(default="15:15")
+    exclude_start: str | None = Field(default=None)
+    exclude_end: str | None = Field(default=None)
+    square_off_time: str | None = Field(default="15:20")
+    enter_on_close: bool = Field(default=False)
+    allow_long: bool = Field(default=True)
+    allow_short: bool = Field(default=True)
+    ema_period: int = Field(default=5, ge=2, le=50)
+    max_trades_per_day: int = Field(default=10, ge=1, le=100)
+    traffic_light_max_range: float | None = Field(default=None, gt=0)
+    same_bar_exit_priority: str = Field(default="stop")
+
+
+def _build_backtest_settings(payload: BacktestRequest) -> BacktestSettings:
+    return BacktestSettings(
+        symbol=payload.symbol.strip(),
+        strategy=payload.strategy,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        timeframe=payload.timeframe,
+        timezone_name=payload.timezone_name,
+        reward_risk=payload.reward_risk,
+        entry_window_bars=payload.entry_window_bars,
+        initial_capital=payload.initial_capital,
+        risk_per_trade=payload.risk_per_trade,
+        session_start=payload.session_start,
+        session_end=payload.session_end,
+        exclude_start=payload.exclude_start,
+        exclude_end=payload.exclude_end,
+        square_off_time=payload.square_off_time,
+        enter_on_close=payload.enter_on_close,
+        allow_long=payload.allow_long,
+        allow_short=payload.allow_short,
+        ema_period=payload.ema_period,
+        max_trades_per_day=payload.max_trades_per_day,
+        traffic_light_max_range=payload.traffic_light_max_range,
+        same_bar_exit_priority=payload.same_bar_exit_priority,
+    )
 
 
 class ConnectionManager:
@@ -157,6 +212,71 @@ def get_scan():
 @app.get("/api/state")
 def get_state():
     return _state
+
+
+@app.get("/api/backtest/strategies")
+def get_backtest_strategies():
+    return {
+        "strategies": [
+            {
+                "id": "ema5_breakout",
+                "name": "5 EMA Breakout",
+                "description": "Alert candle fully away from the 5 EMA, entry on the break of that candle within the next N candles.",
+                "defaults": {
+                    "timeframe": "M5",
+                    "reward_risk": 3.0,
+                    "entry_window_bars": 3,
+                    "session_start": None,
+                    "session_end": None,
+                    "square_off_time": None,
+                    "enter_on_close": False,
+                    "ema_period": 5,
+                },
+            },
+            {
+                "id": "traffic_light",
+                "name": "Traffic Light",
+                "description": "Breakout of the high or low of a two-candle red/green contrast range within the configured entry window.",
+                "defaults": {
+                    "timeframe": "M5",
+                    "reward_risk": 3.0,
+                    "entry_window_bars": 3,
+                    "session_start": None,
+                    "session_end": None,
+                    "square_off_time": None,
+                    "enter_on_close": False,
+                    "traffic_light_max_range": None,
+                },
+            },
+        ],
+        "presets": [
+            {"label": "XAUUSD Search", "query": "xauusd"},
+            {"label": "EURUSD Search", "query": "eurusd"},
+        ],
+    }
+
+
+@app.get("/api/backtest/symbols")
+def get_backtest_symbols(query: str = "", limit: int = 20):
+    try:
+        return {"symbols": search_symbols(query=query, limit=min(limit, 50))}
+    except Exception as exc:
+        logger.warning("Backtest symbol search failed: %s", exc)
+        raise HTTPException(status_code=503, detail=f"Unable to load MT5 symbols: {exc}") from exc
+
+
+@app.post("/api/backtest/run")
+def run_backtest_route(payload: BacktestRequest):
+    try:
+        settings_obj = _build_backtest_settings(payload)
+        return run_backtest(settings_obj)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Backtest run failed")
+        raise HTTPException(status_code=500, detail=f"Backtest failed: {exc}") from exc
 
 @app.get("/api/journal/daily")
 def get_journal_daily():

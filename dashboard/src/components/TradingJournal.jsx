@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { resolveServiceEndpoint } from '../lib/serviceEndpoint'
 
 export default function TradingJournal() {
     const [stats, setStats] = useState({ total_profit: 0, win_rate: 0, total: 0, avg_rr: 0 })
@@ -11,8 +12,8 @@ export default function TradingJournal() {
 
         async function fetchJournal() {
             try {
-                const host = window.location.hostname || 'localhost';
-                const apiBase = `http://${host}:8000/api/journal`;
+                const endpoint = await resolveServiceEndpoint();
+                const apiBase = `${endpoint.apiBase}/api/journal`;
 
                 const [dRes, cRes, tRes] = await Promise.all([
                     fetch(`${apiBase}/daily`),

@@ -48,7 +48,10 @@ class GeminiNewsAnalyzer:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
         self.client = None
-        self.model_id = "gemma-4-31b-it"
+        # Primary and fallback models
+        self.models = ["gemma-4-31b-it", "gemini-2.5-flash", "gemini-2.5-pro"]
+        self.current_model_idx = 0
+        self.model_id = self.models[self.current_model_idx]
         self.cache = {}  # {symbol: (timestamp, result)}
         self.cache_ttl = 900  # 15 minutes — avoid API spam
         self._initialized = False
@@ -57,7 +60,7 @@ class GeminiNewsAnalyzer:
             try:
                 self.client = genai.Client(api_key=self.api_key)
                 self._initialized = True
-                print(f"[GEMINI] News Analyzer initialized ({self.model_id})")
+                print(f"[GEMINI] News Analyzer initialized (Primary: {self.model_id})")
             except Exception as e:
                 print(f"[GEMINI] Init failed: {e}")
         else:
@@ -132,57 +135,78 @@ IMPORTANT RULES:
 - Focus on events from the last 24 hours
 - Consider both fundamental AND sentiment factors"""
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,  # Low temperature for consistent analysis
-                    max_output_tokens=500,
+        max_retries = 3
+        base_delay = 2.0
+        
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.1,  # Low temperature for consistent analysis
+                        max_output_tokens=500,
+                    )
                 )
-            )
 
-            # Parse the JSON response
-            text = response.text.strip()
-            # Remove markdown code fences if present
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1]  # Remove first line
-                if text.endswith("```"):
-                    text = text[:-3]
-                elif "```" in text:
-                    text = text[:text.rfind("```")]
-            text = text.strip()
+                # Parse the JSON response
+                text = response.text.strip()
+                # Remove markdown code fences if present
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1]  # Remove first line
+                    if text.endswith("```"):
+                        text = text[:-3]
+                    elif "```" in text:
+                        text = text[:text.rfind("```")]
+                text = text.strip()
 
-            data = json.loads(text)
+                data = json.loads(text)
 
-            # Validate and clamp values
-            score = max(-1.0, min(1.0, float(data.get("sentiment_score", 0))))
-            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.3))))
-            emotion_score = max(0.0, min(1.0, float(data.get("emotion_score", 0.5))))
+                # Validate and clamp values
+                score = max(-1.0, min(1.0, float(data.get("sentiment_score", 0))))
+                confidence = max(0.0, min(1.0, float(data.get("confidence", 0.3))))
+                emotion_score = max(0.0, min(1.0, float(data.get("emotion_score", 0.5))))
 
-            result = {
-                "score": round(score, 3),
-                "confidence": round(confidence, 3),
-                "direction_bias": data.get("direction_bias", "NEUTRAL"),
-                "emotion_state": data.get("emotion_state", "NEUTRAL"),
-                "emotion_score": round(emotion_score, 3),
-                "key_events": data.get("key_events", [])[:5],
-                "risk_level": data.get("risk_level", "MEDIUM"),
-                "reasoning": data.get("reasoning", ""),
-                "source": self.model_id,
-                "symbol": symbol,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+                result = {
+                    "score": round(score, 3),
+                    "confidence": round(confidence, 3),
+                    "direction_bias": data.get("direction_bias", "NEUTRAL"),
+                    "emotion_state": data.get("emotion_state", "NEUTRAL"),
+                    "emotion_score": round(emotion_score, 3),
+                    "key_events": data.get("key_events", [])[:5],
+                    "risk_level": data.get("risk_level", "MEDIUM"),
+                    "reasoning": data.get("reasoning", ""),
+                    "source": self.model_id,
+                    "symbol": symbol,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
 
-            print(f"[GEMINI] {symbol}: {result['direction_bias']} ({result['score']:+.2f}) "
-                  f"| Emotion: {result['emotion_state']} ({result['emotion_score']:.2f}) "
-                  f"| Conf: {result['confidence']:.0%} | {result['reasoning'][:80]}")
+                print(f"[GEMINI] {symbol}: {result['direction_bias']} ({result['score']:+.2f}) "
+                      f"| Emotion: {result['emotion_state']} ({result['emotion_score']:.2f}) "
+                      f"| Conf: {result['confidence']:.0%} | {result['reasoning'][:80]}")
 
-            return result
+                # Success, reset to primary model if we had fallen back and it's been a while, 
+                # but for simplicity we keep whichever model is working.
+                return result
 
-        except Exception as e:
-            print(f"[GEMINI] API call/parse failed for {symbol}: {e}")
-            return self._neutral_response(symbol, str(e)[:50])
+            except Exception as e:
+                error_str = str(e)
+                print(f"[GEMINI] Attempt {attempt + 1}/{max_retries} failed for {symbol} using {self.model_id}: {error_str[:150]}")
+                
+                # Check for 5xx errors or service unavailability to trigger fallback
+                if "500" in error_str or "503" in error_str or "Service Unavailable" in error_str or "Internal Server Error" in error_str:
+                    # Switch to next model
+                    self.current_model_idx = (self.current_model_idx + 1) % len(self.models)
+                    self.model_id = self.models[self.current_model_idx]
+                    print(f"[GEMINI] Switching fallback model to: {self.model_id}")
+                
+                if attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt)
+                    print(f"[GEMINI] Retrying in {sleep_time}s...")
+                    time.sleep(sleep_time)
+                else:
+                    print(f"[GEMINI] All {max_retries} attempts failed.")
+                    return self._neutral_response(symbol, f"API error after retries: {error_str[:50]}")
 
     def _neutral_response(self, symbol: str, reason: str = "") -> Dict:
         return {

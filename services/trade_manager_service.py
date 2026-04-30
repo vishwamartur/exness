@@ -56,6 +56,51 @@ class TradeManagerService(BaseService):
         """Manage all active positions at the start of each scan cycle."""
         try:
             positions = await self.gateway.get_all_positions()
+            positions = positions or []
+
+            # --- SYNC DATABASE CLOSURES ---
+            try:
+                import sqlite3
+                import os
+                import datetime
+                import MetaTrader5 as _mt5
+                
+                db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trade_journal.db")
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT ticket FROM trades WHERE outcome = 'OPEN'")
+                open_db_tickets = {row[0] for row in cursor.fetchall()}
+                conn.close()
+                
+                active_mt5_tickets = {pos.ticket for pos in positions}
+                missing_tickets = open_db_tickets - active_mt5_tickets
+                
+                if missing_tickets:
+                    # Look back 30 days for deals
+                    deals = _mt5.history_deals_get(datetime.datetime.now() - datetime.timedelta(days=30), datetime.datetime.now())
+                    for missing_ticket in missing_tickets:
+                        total_profit = 0.0
+                        last_price = 0.0
+                        reason = "Missing from MT5 (Auto-Sync)"
+                        
+                        if deals:
+                            closing_deals = [d for d in deals if d.position_id == missing_ticket and d.entry == _mt5.DEAL_ENTRY_OUT]
+                            if closing_deals:
+                                total_profit = sum(d.profit + d.commission + d.swap for d in closing_deals)
+                                last_price = closing_deals[-1].price
+                                reason = "MT5 Native Close (SL/TP)"
+                                
+                        await self.emit(EventTypes.POSITION_CLOSED, {
+                            "ticket": missing_ticket,
+                            "exit_price": last_price,
+                            "profit": total_profit,
+                            "reason": reason,
+                            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        })
+            except Exception as e:
+                logger.error(f"Sync closures failed: {e}")
+            # --- END SYNC ---
+
             if not positions:
                 return
 

@@ -8,13 +8,14 @@ import EventLog from './components/EventLog'
 import ForexSessionClocks from './components/ForexSessionClocks'
 import TradingJournal from './components/TradingJournal'
 import OrderBook from './components/OrderBook'
+import BacktestingLab from './components/BacktestingLab'
 
 const VERSION = '2.2'
 
 export default function App() {
     const state = useBotWebSocket()
     const [now, setNow] = useState(new Date())
-    const [activeTab, setActiveTab] = useState('live')
+    const [activeTab, setActiveTab] = useState('backtest')
 
     // Clock
     useEffect(() => {
@@ -81,6 +82,18 @@ export default function App() {
                             }}
                         >
                             Trading Journal
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('backtest')}
+                            style={{
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                fontSize: 13, fontWeight: 600, paddingBottom: 6,
+                                color: activeTab === 'backtest' ? 'var(--blue)' : 'var(--text-secondary)',
+                                borderBottom: activeTab === 'backtest' ? '2px solid var(--blue)' : '2px solid transparent',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Backtesting Lab
                         </button>
                         <button
                             onClick={() => setActiveTab('mirofish')}
@@ -155,6 +168,10 @@ export default function App() {
             ) : activeTab === 'journal' ? (
                 <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'hidden' }}>
                     <TradingJournal />
+                </div>
+            ) : activeTab === 'backtest' ? (
+                <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'auto' }}>
+                    <BacktestingLab />
                 </div>
             ) : (
                 <div style={{ gridColumn: '1 / -1', gridRow: '2 / 5', overflow: 'hidden', background: '#fff', borderRadius: 'var(--radius-lg)' }}>

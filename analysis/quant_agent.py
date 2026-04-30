@@ -95,8 +95,12 @@ class QuantAgent:
         sell_score, sell_details = self._calculate_confluence(symbol, df, "sell", h1, h4, m5)
         
         best_score = max(buy_score, sell_score)
-        direction = "BUY" if buy_score >= sell_score else "SELL"
-        details = buy_details if direction == "BUY" else sell_details
+        if best_score == 0:
+            direction = "NEUTRAL"
+            details = {}
+        else:
+            direction = "BUY" if buy_score >= sell_score else "SELL"
+            details = buy_details if direction == "BUY" else sell_details
         
         # Basic Ensemble Voting
         ensemble_score, agreement_count, model_votes = self._ensemble_vote(

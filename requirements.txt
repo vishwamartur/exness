@@ -18,3 +18,4 @@ hmmlearn
 requests
 boto3
 websocket-client
+yfinance

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-
-const REST_URL = 'http://localhost:8000'
+import { resolveServiceEndpoint } from '../lib/serviceEndpoint'
 
 // Generate synthetic DOM levels based on live price
 function generateLevels(basePrice, isAsk, spreadPip = 0.5) {
@@ -37,7 +36,8 @@ export default function OrderBook({ symbol = "XAUUSDm" }) {
     useEffect(() => {
         const fetchQuote = async () => {
             try {
-                const res = await fetch(`${REST_URL}/api/quote?symbol=${symbol}`)
+                const endpoint = await resolveServiceEndpoint()
+                const res = await fetch(`${endpoint.apiBase}/api/quote?symbol=${symbol}`)
                 if (!res.ok) return
                 const data = await res.json()
                 

@@ -37,9 +37,10 @@ from core.event_bus import EventBus
 from core.mt5_gateway import MT5Gateway
 
 from services.market_data_service import MarketDataService
-from services.quant_service import QuantService
-from services.regime_service import RegimeService
-from services.sentiment_service import SentimentService
+from services.session_regime_service import SessionRegimeService
+from services.session_strategy_service import SessionStrategyService
+from services.macro_filter_service import MacroFilterService
+from services.liquidity_sweep_service import LiquiditySweepService
 from services.risk_service import RiskService
 from services.execution_service import ExecutionService
 from services.trade_manager_service import TradeManagerService
@@ -47,17 +48,13 @@ from services.broadcast_service import BroadcastService
 from services.telegram_service import TelegramService
 from services.journal_service import JournalService
 from services.coordinator import CoordinatorService
-
-from services.strategy_service import StrategyService
-from services.flow_service import FlowService
-from services.performance_service import PerformanceService
 from services.news_trading_service import NewsTradingService
-from services.gemma_brain_service import GemmaBrainService
 
 
 async def main():
     print("=" * 60)
-    print("  MT5 EVENT-DRIVEN ARCHITECTURE v3.0")
+    print("  MT5 SESSION REGIME ENGINE v4.0")
+    print("  Edges: Session Switching | Macro Filter | Liquidity Sweep")
     print(f"  Start Time: {datetime.now()}")
     print("=" * 60)
 
@@ -97,16 +94,10 @@ async def main():
             print(f"[DASHBOARD] Could not launch: {e}")
 
     # ── 4. Create Services ────────────────────────────────────────────
-    # Shared RiskManager instance (services that need it share state)
     from execution.mt5_client import MT5Client
     from utils.risk_manager import RiskManager
     mt5_client = MT5Client()
     risk_manager = RiskManager(mt5_client)
-
-    # 🧠 Gemma 4 Brain — instantiate before services list
-    gemma_brain = None
-    if getattr(settings, 'GEMMA_BRAIN_ENABLED', True):
-        gemma_brain = GemmaBrainService(bus, gateway)
 
     risk_svc = RiskService(bus, gateway, risk_manager=risk_manager)
 
@@ -114,20 +105,17 @@ async def main():
         # Data layer
         MarketDataService(bus, gateway),
 
-        # Analysis layer
-        QuantService(bus),
-        RegimeService(bus),
-        SentimentService(bus),
-        StrategyService(bus),
-        FlowService(bus),
+        # Session Regime Engine (Edge #1 + #2 + #3)
+        SessionRegimeService(bus, gateway),
+        SessionStrategyService(bus),
+        MacroFilterService(bus),
+        LiquiditySweepService(bus),
+
+        # News trading (preserved)
         NewsTradingService(bus),
 
-        # 🧠 Gemma 4 Brain — AI trader vetting layer
-        *([gemma_brain] if gemma_brain else []),
-
-        # Decision layer
+        # Decision layer (hardened risk)
         risk_svc,
-        PerformanceService(bus),
 
         # Execution layer
         ExecutionService(bus, gateway),
@@ -155,12 +143,12 @@ async def main():
             traceback.print_exc()
 
     print(f"\n{'='*60}")
-    print(f"  ALL SERVICES RUNNING — {len(services)} active")
+    print(f"  SESSION REGIME ENGINE RUNNING — {len(services)} services")
     print(f"  EventBus: subscribers={bus.subscriber_count}")
     print(f"  Interval: {settings.COOLDOWN_SECONDS}s")
-    if gemma_brain and gemma_brain._enabled:
-        risk_svc.set_gemma_brain_active(True)
-        print(f"  🧠 Gemma 4 Brain: ACTIVE (min_conf={settings.GEMMA_MIN_CONFIDENCE}%)")
+    print(f"  Risk: {settings.RISK_PERCENT}% per trade | "
+          f"Max leverage: 1:{settings.MAX_EFFECTIVE_LEVERAGE} | "
+          f"Daily loss cap: {settings.MAX_DAILY_LOSS_PERCENT}%")
     print(f"{'='*60}\n")
 
     # ── 7. Run Until Interrupted ──────────────────────────────────────

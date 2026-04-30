@@ -46,6 +46,17 @@ class EventTypes:
     NEWS_TRADE_SIGNAL  = "NEWS_TRADE_SIGNAL"
     NEWS_STRADDLE_REQUEST = "NEWS_STRADDLE_REQUEST"
 
+    # Session Regime
+    SESSION_REGIME_UPDATE  = "SESSION_REGIME_UPDATE"
+    SESSION_TRADE_SIGNAL   = "SESSION_TRADE_SIGNAL"
+    MACRO_FILTER_UPDATE    = "MACRO_FILTER_UPDATE"
+    SWEEP_TRADE_SIGNAL     = "SWEEP_TRADE_SIGNAL"
+    FLAT_ALL_POSITIONS     = "FLAT_ALL_POSITIONS"
+
+    # Risk Management
+    DAILY_LOSS_LIMIT_HIT   = "DAILY_LOSS_LIMIT_HIT"
+    KILL_SWITCH_ACTIVATED  = "KILL_SWITCH_ACTIVATED"
+
     # Analysis
     QUANT_SIGNAL       = "QUANT_SIGNAL"
     REGIME_UPDATE      = "REGIME_UPDATE"
@@ -107,6 +118,15 @@ _EVENT_PRIORITY: Dict[str, EventPriority] = {
     EventTypes.NEWS_UPDATE:        EventPriority.DATA,
     EventTypes.NEWS_TRADE_SIGNAL:  EventPriority.ANALYSIS,
     EventTypes.NEWS_STRADDLE_REQUEST: EventPriority.EXECUTION,
+
+    # Session Regime
+    EventTypes.SESSION_REGIME_UPDATE: EventPriority.ANALYSIS,
+    EventTypes.SESSION_TRADE_SIGNAL:  EventPriority.ANALYSIS,
+    EventTypes.MACRO_FILTER_UPDATE:   EventPriority.DATA,
+    EventTypes.SWEEP_TRADE_SIGNAL:    EventPriority.ANALYSIS,
+    EventTypes.FLAT_ALL_POSITIONS:    EventPriority.EXECUTION,
+    EventTypes.DAILY_LOSS_LIMIT_HIT:  EventPriority.CRITICAL,
+    EventTypes.KILL_SWITCH_ACTIVATED: EventPriority.CRITICAL,
 
     EventTypes.SCAN_START:         EventPriority.OUTPUT,
     EventTypes.SCAN_COMPLETE:      EventPriority.OUTPUT,

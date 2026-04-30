@@ -67,37 +67,57 @@ LOT_SIZE = float(os.getenv("LOT_SIZE", 0.01))  # Base lot size
 DEVIATION = int(os.getenv("DEVIATION", 30))     # Wider deviation for Gold volatility
 LEVERAGE = int(os.getenv("LEVERAGE", 1000))
 
-# ─── ⚡ QUICK SCALP MODE — Big Lots, Fast Entry, Book Profit Fast ────────────
-# Enable this when you have sufficient balance and want high-frequency
-# aggressive scalping with larger position sizes and rapid profit booking.
-QUICK_SCALP_MODE = os.getenv("QUICK_SCALP_MODE", "True").lower() == "true"
+# ─── SESSION REGIME SWITCHING (Edge #1) ──────────────────────────────────
+# The most robust edge: detect which session is active and switch strategy.
+SESSION_REGIME_ENABLED = os.getenv("SESSION_REGIME_ENABLED", "True").lower() == "true"
+ASIAN_SESSION_START = float(os.getenv("ASIAN_SESSION_START", 22.0))   # 22:00 UTC
+ASIAN_SESSION_END = float(os.getenv("ASIAN_SESSION_END", 8.0))       # 08:00 UTC
+LONDON_SESSION_START = float(os.getenv("LONDON_SESSION_START", 8.0))
+LONDON_SESSION_END = float(os.getenv("LONDON_SESSION_END", 13.0))
+NY_SESSION_START = float(os.getenv("NY_SESSION_START", 13.0))
+NY_SESSION_END = float(os.getenv("NY_SESSION_END", 17.0))
+NY_AFTERNOON_START = float(os.getenv("NY_AFTERNOON_START", 17.0))
+NY_AFTERNOON_END = float(os.getenv("NY_AFTERNOON_END", 22.0))
 
-# Big Lot sizing for Quick Scalp
-QUICK_SCALP_LOT_SIZE = float(os.getenv("QUICK_SCALP_LOT_SIZE", 0.5))  # 0.5 lot per trade (big)
-QUICK_SCALP_MAX_LOT = float(os.getenv("QUICK_SCALP_MAX_LOT", 2.0))    # Max 2.0 lot cap
-QUICK_SCALP_RISK_PERCENT = float(os.getenv("QUICK_SCALP_RISK_PERCENT", 3.0))  # 3% risk per scalp
+# Asian Range Breakout Parameters
+BREAKOUT_ATR_MULTIPLIER = float(os.getenv("BREAKOUT_ATR_MULTIPLIER", 2.0))
+ASIAN_RSI_OVERBOUGHT = float(os.getenv("ASIAN_RSI_OVERBOUGHT", 70))
+ASIAN_RSI_OVERSOLD = float(os.getenv("ASIAN_RSI_OVERSOLD", 30))
 
-# Fast SL/TP — tight SL, book profit quickly at 1:1.2 R:R minimum
-QUICK_SCALP_SL_ATR = float(os.getenv("QUICK_SCALP_SL_ATR", 0.5))   # 0.5x ATR — very tight SL
-QUICK_SCALP_TP_ATR = float(os.getenv("QUICK_SCALP_TP_ATR", 1.0))   # 1.0x ATR — book profit fast
-QUICK_SCALP_MIN_RR = float(os.getenv("QUICK_SCALP_MIN_RR", 1.2))   # 1:1.2 enough for quick scalp
+# ─── MACRO FILTER (Edge #2 — DXY + VIX) ─────────────────────────────────
+MACRO_FILTER_ENABLED = os.getenv("MACRO_FILTER_ENABLED", "True").lower() == "true"
+VIX_SAFE_HAVEN_THRESHOLD = float(os.getenv("VIX_SAFE_HAVEN_THRESHOLD", 25))
+VIX_CALM_THRESHOLD = float(os.getenv("VIX_CALM_THRESHOLD", 20))
+VIX_RANGE_LOW = float(os.getenv("VIX_RANGE_LOW", 15))
+DXY_SPIKE_THRESHOLD = float(os.getenv("DXY_SPIKE_THRESHOLD", 0.003))
+MACRO_POLL_MINUTES = int(os.getenv("MACRO_POLL_MINUTES", 15))
 
-# Speed — low cooldown, fast cycles, low confluence bar
-QUICK_SCALP_COOLDOWN = int(os.getenv("QUICK_SCALP_COOLDOWN", 30))        # 30s between trades
-QUICK_SCALP_MIN_CONFLUENCE = int(os.getenv("QUICK_SCALP_MIN_CONFLUENCE", 1))  # Allow score ≥ 1
-QUICK_SCALP_MIN_ML_PROB = float(os.getenv("QUICK_SCALP_MIN_ML_PROB", 0.50))  # Prob ≥ 50%
-QUICK_SCALP_MAX_POSITIONS = int(os.getenv("QUICK_SCALP_MAX_POSITIONS", 5))   # Up to 5 concurrent
+# ─── LIQUIDITY SWEEP (Edge #3) ───────────────────────────────────────────
+SWEEP_ENABLED = os.getenv("SWEEP_ENABLED", "True").lower() == "true"
+SWEEP_BUFFER_PIPS = float(os.getenv("SWEEP_BUFFER_PIPS", 3))   # 2-3 pips above PDH
+SWEEP_NEWS_GUARD_MINUTES = int(os.getenv("SWEEP_NEWS_GUARD_MINUTES", 15))
 
-# Aggressive Profit Booking - lock in profits immediately
-QUICK_SCALP_BREAKEVEN_ATR = float(os.getenv("QUICK_SCALP_BREAKEVEN_ATR", 0.3))  # BE at 0.3x ATR
-QUICK_SCALP_TRAIL_ATR = float(os.getenv("QUICK_SCALP_TRAIL_ATR", 0.4))          # Trail at 0.4x ATR
-QUICK_SCALP_PARTIAL_FRACTION = float(os.getenv("QUICK_SCALP_PARTIAL_FRACTION", 0.50))  # Close 50% at BE
-QUICK_SCALP_EARLY_CUT_ATR = float(os.getenv("QUICK_SCALP_EARLY_CUT_ATR", 0.3))  # Cut losers at 0.3x ATR
+print(f"[SETTINGS] SESSION_REGIME: {'ENABLED' if SESSION_REGIME_ENABLED else 'disabled'}")
+print(f"[SETTINGS] MACRO_FILTER: {'ENABLED' if MACRO_FILTER_ENABLED else 'disabled'}")
+print(f"[SETTINGS] LIQUIDITY_SWEEP: {'ENABLED' if SWEEP_ENABLED else 'disabled'}")
 
-# Always use MARKET orders (not limit) — instant fill
+# ─── ⚡ QUICK SCALP MODE (LEGACY — superseded by Session Regime) ─────────
+QUICK_SCALP_MODE = os.getenv("QUICK_SCALP_MODE", "False").lower() == "true"
+QUICK_SCALP_LOT_SIZE = float(os.getenv("QUICK_SCALP_LOT_SIZE", 0.1))
+QUICK_SCALP_MAX_LOT = float(os.getenv("QUICK_SCALP_MAX_LOT", 0.5))
+QUICK_SCALP_RISK_PERCENT = float(os.getenv("QUICK_SCALP_RISK_PERCENT", 1.0))
+QUICK_SCALP_SL_ATR = float(os.getenv("QUICK_SCALP_SL_ATR", 1.5))
+QUICK_SCALP_TP_ATR = float(os.getenv("QUICK_SCALP_TP_ATR", 2.0))
+QUICK_SCALP_MIN_RR = float(os.getenv("QUICK_SCALP_MIN_RR", 1.5))
+QUICK_SCALP_COOLDOWN = int(os.getenv("QUICK_SCALP_COOLDOWN", 60))
+QUICK_SCALP_MIN_CONFLUENCE = int(os.getenv("QUICK_SCALP_MIN_CONFLUENCE", 3))
+QUICK_SCALP_MIN_ML_PROB = float(os.getenv("QUICK_SCALP_MIN_ML_PROB", 0.55))
+QUICK_SCALP_MAX_POSITIONS = int(os.getenv("QUICK_SCALP_MAX_POSITIONS", 3))
+QUICK_SCALP_BREAKEVEN_ATR = float(os.getenv("QUICK_SCALP_BREAKEVEN_ATR", 0.6))
+QUICK_SCALP_TRAIL_ATR = float(os.getenv("QUICK_SCALP_TRAIL_ATR", 0.8))
+QUICK_SCALP_PARTIAL_FRACTION = float(os.getenv("QUICK_SCALP_PARTIAL_FRACTION", 0.50))
+QUICK_SCALP_EARLY_CUT_ATR = float(os.getenv("QUICK_SCALP_EARLY_CUT_ATR", 0.6))
 QUICK_SCALP_MARKET_ORDER = os.getenv("QUICK_SCALP_MARKET_ORDER", "True").lower() == "true"
-
-print(f"[SETTINGS] QUICK_SCALP_MODE: {'ENABLED ⚡ (Big Lots, Fast Entry)' if QUICK_SCALP_MODE else 'disabled'}")
 
 # ─── 🧠 Gemma 4 Brain Settings ─────────────────────────────────────────────
 GEMMA_BRAIN_ENABLED = os.getenv("GEMMA_BRAIN_ENABLED", "True").lower() == "true"
@@ -106,42 +126,47 @@ GEMMA_BOOST_THRESHOLD = int(os.getenv("GEMMA_BOOST_THRESHOLD", 75))  # Boost sco
 print(f"[SETTINGS] GEMMA_BRAIN: {'ENABLED 🧠' if GEMMA_BRAIN_ENABLED else 'disabled'}")
 
 
-# ─── Institutional Risk Management ───────────────────────────────────────
-FORCE_TEST_TRADES = False                                   # <--- LIVE TRADING MODE
-RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))       # 1% risk per scalp (XAUUSD focus)
-MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 2.0))  # 2% max for A+ Gold setups
+# ─── HARD RISK CAPS (Non-Negotiable — Survival First) ────────────────────
+FORCE_TEST_TRADES = False
+RISK_PERCENT = float(os.getenv("RISK_PERCENT", 1.0))          # 1% max per trade
+MAX_RISK_PERCENT = float(os.getenv("MAX_RISK_PERCENT", 1.5))  # 1.5% absolute max
+MAX_EFFECTIVE_LEVERAGE = int(os.getenv("MAX_EFFECTIVE_LEVERAGE", 20))  # 1:20 (ignore broker)
+MAX_DAILY_LOSS_PERCENT = float(os.getenv("MAX_DAILY_LOSS_PERCENT", 3.0))  # 3% → shutdown
+CONSECUTIVE_LOSS_LIMIT = int(os.getenv("CONSECUTIVE_LOSS_LIMIT", 3))  # Kill switch
+KILL_SWITCH_REDUCTION = float(os.getenv("KILL_SWITCH_REDUCTION", 0.5))  # 50% size for 24h
+SPREAD_REJECT_THRESHOLD = float(os.getenv("SPREAD_REJECT_THRESHOLD", 30))  # 30 pips = $0.30
+SWAP_AWARENESS = os.getenv("SWAP_AWARENESS", "True").lower() == "true"
 
-# ATR-Based Dynamic SL/TP — tight SL, wide TP for Gold scalping
-ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 0.8))  # 0.8x ATR — tight SL for quick scalps
-ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.0))  # 2.0x ATR — 1:2.5 R:R target
+# ATR-Based Dynamic SL/TP
+ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))
+ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 3.0))
 
-# Confluence Gating — relaxed for more trade opportunities
-MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 2))  # Strict: Requires ML + Strategy agreement
-SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 4))     # Sureshot at 4
-RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.52))   # Strict: >52% ML edge
-MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0)) # 1:2.0 strict minimum R:R
+# Confluence Gating
+MIN_CONFLUENCE_SCORE = int(os.getenv("MIN_CONFLUENCE_SCORE", 5))  # Session signals score 6-9
+SURESHOT_MIN_SCORE = int(os.getenv("SURESHOT_MIN_SCORE", 8))
+RF_PROB_THRESHOLD = float(os.getenv("RF_PROB_THRESHOLD", 0.55))
+MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0))
 
-# ─── Kelly Criterion Position Sizing ─────────────────────────────────────
-USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"  # Enable Kelly Criterion
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))  # Quarter-Kelly (safer, avoids ruin)
-KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))   # Min trades before Kelly activates
+# Kelly Criterion
+USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))
+KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))
 
-# Cost Awareness (Critical for Retail Traders)
-COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))  # $7 per lot round turn (Raw Spread)
-MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0)) # Profit must cover Commission x 3
+# Cost Awareness
+COMMISSION_PER_LOT = float(os.getenv("COMMISSION_PER_LOT", 7.0))
+MIN_NET_PROFIT_RATIO = float(os.getenv("MIN_NET_PROFIT_RATIO", 3.0))
 
-
-#─── Trade Management────────────────────────────────────────────────────
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 30 if os.getenv("QUICK_SCALP_MODE", "True").lower() == "true" else 120))    # 30s in quick scalp mode, 2-min otherwise
-RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 2.0))    # Scale up to 2x on A+ setups
-MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 9999))   # Unlimited trades (XAUUSD focus)
-MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 100.0)) # Hard stop if daily loss > $100
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 50))  # Unlimited positions (XAUUSD focus)
-LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 10)) # Short expiry for scalps
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 10))  # Allow multiple Gold positions
-MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))   # Reject high-spread entries (forex)
-MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))  # Wider for crypto
-MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 80.0))  # Tighter for Gold scalping
+# ─── Trade Management (HARDENED) ─────────────────────────────────────────
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", 60))
+RISK_FACTOR_MAX = float(os.getenv("RISK_FACTOR_MAX", 1.5))
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", 10))       # Reasonable daily limit
+MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", 100.0))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 3))    # Hard cap
+LIMIT_ORDER_EXPIRATION_MINUTES = int(os.getenv("LIMIT_ORDER_EXPIRATION_MINUTES", 10))
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", 3))
+MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", 3.0))
+MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", 20000.0))
+MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", 30.0))  # 30 pips for Gold
 
 # ─── Volatility-Adaptive Entry ───────────────────────────────────────────
 # Minimum ATR required to enter a scalp trade (avoid dead/ranging markets)
@@ -239,12 +264,15 @@ FAKE_NEWS_MIN_CREDIBILITY = float(os.getenv("FAKE_NEWS_MIN_CREDIBILITY", 0.4))  
 FAKE_NEWS_DISCOUNT_FACTOR = float(os.getenv("FAKE_NEWS_DISCOUNT_FACTOR", 0.1))    # Reduce news weight to 10% when flagged
 
 # ─── Session Awareness (UTC hours) — widened for XAUUSD scalping ─────────
+# Session filter now handled by SessionRegimeService — allow all hours through
+# (the regime service itself decides what trades are allowed when)
 TRADE_SESSIONS = {
-    "london":      {"start": 7.0, "end": 11.0},  # London session (4 hours)
-    "ny":          {"start": 13.0, "end": 17.0},  # New York session (4 hours)
-    "overlap":     {"start": 13.0, "end": 16.0},  # London/NY overlap (peak Gold)
+    "asian":       {"start": 22.0, "end": 8.0},   # Asian (wraps midnight)
+    "london":      {"start": 8.0, "end": 13.0},   # London session
+    "ny":          {"start": 13.0, "end": 17.0},   # New York session
+    "ny_afternoon":{"start": 17.0, "end": 22.0},   # NY Afternoon (FLAT)
 }
-SESSION_FILTER = os.getenv("SESSION_FILTER", "True").lower() == "true"  # Enabled for strict liquidity windows
+SESSION_FILTER = False  # Disabled — SessionRegimeService handles session logic
 
 USE_PATTERN_MEMORY = True  # Strict RAG historical embedding blocks
 
