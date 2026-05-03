@@ -283,7 +283,7 @@ class MassiveFeed:
                 except websocket.WebSocketTimeoutException:
                     continue  # Timeout is fine, just loop
                 except websocket.WebSocketConnectionClosedException:
-                    logger.warning(f"[MASSIVE] Connection closed by server")
+                    logger.warning("[MASSIVE] Connection closed by server")
                     break
                     
         finally:
