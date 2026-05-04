@@ -32,7 +32,7 @@ def test_client_initialization():
     from analysis.mirofish_client import MiroFishClient
     
     client = MiroFishClient(base_url="http://localhost:5001", timeout=30)
-    assert client.base_url == "http://localhost:5001", f"Expected base_url without trailing slash"
+    assert client.base_url == "http://localhost:5001", "Expected base_url without trailing slash"
     assert client.timeout == 30
     
     # Test trailing slash removal
