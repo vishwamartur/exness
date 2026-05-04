@@ -80,7 +80,7 @@ NY_AFTERNOON_START = float(os.getenv("NY_AFTERNOON_START", 17.0))
 NY_AFTERNOON_END = float(os.getenv("NY_AFTERNOON_END", 22.0))
 
 # Asian Range Breakout Parameters
-BREAKOUT_ATR_MULTIPLIER = float(os.getenv("BREAKOUT_ATR_MULTIPLIER", 2.0))
+BREAKOUT_ATR_MULTIPLIER = float(os.getenv("BREAKOUT_ATR_MULTIPLIER", 0.5))
 ASIAN_RSI_OVERBOUGHT = float(os.getenv("ASIAN_RSI_OVERBOUGHT", 70))
 ASIAN_RSI_OVERSOLD = float(os.getenv("ASIAN_RSI_OVERSOLD", 30))
 

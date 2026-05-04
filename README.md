@@ -1,145 +1,170 @@
-# 🤖 Institutional Swarm — MT5 Agentic Trading System v2.3
+# ⚡ XAUUSD Session Regime Engine v4.0
 
-A **Multi-Agent Asynchronous Scalping System** for MetaTrader 5. A swarm of specialized AI agents scan all available pairs, debate every trade, manage risk, and push real-time alerts to a React dashboard and Telegram — running fully autonomously.
+An **event-driven algorithmic trading engine** for MetaTrader 5, purpose-built to trade **XAUUSD (Gold)** using session-aware regime switching, macro filtering, and institutional liquidity sweep detection.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
 [![MT5](https://img.shields.io/badge/MetaTrader-5-orange)](https://www.metatrader5.com)
 [![React](https://img.shields.io/badge/Dashboard-React%20%2B%20Vite-61dafb)](https://vitejs.dev)
-[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)](https://fastapi.tiangolo.com)
+[![Exness](https://img.shields.io/badge/Broker-Exness-yellow)](https://www.exness.com)
 
 ---
 
-## 🧠 Multi-Agent Architecture
+## 🎯 Trading Strategy
 
-Every scan cycle, a dedicated **PairAgent** runs independently for each symbol. Shared agents coordinate across the swarm:
+The engine exploits **three proven edges** that work specifically for XAUUSD:
 
-```
-InstitutionalStrategy (Orchestrator)
-├── PairAgent × N          — one per symbol (EURUSD, BTCUSD, XAUUSD …)
-│   ├── QuantAgent         — SMC + Ensemble ML + LSTM signal scoring
-│   ├── MarketAnalyst      — Macro regime (Risk-On / Risk-Off / Range)
-│   ├── ResearcherAgent    — LLM Bull vs Bear debate → GO / NO-GO verdict
-│   ├── CriticAgent        — Post-trade review, lessons learned (async)
-│   └── RiskManager        — Kill Switch, Payoff Mandate, ATR sizing
-└── InstitutionalStrategy  — Scan loop, position management, Telegram + WebSocket events
-```
+### Edge #1 — Session Regime Switching (Primary)
 
-| Agent | Role | Model |
-|-------|------|-------|
-| **QuantAgent** | Technical signals: SMC, FVG, confluence score 0–6 | XGBoost + Random Forest + TabTransformer + Sequence Transformer + LSTM |
-| **MarketAnalyst** | News-driven regime classification | Groq (Llama 3) / Mistral / Gemini via REST |
-| **ResearcherAgent** | Bull vs Bear debate → final GO/NO-GO | Groq (Llama 3) / Mistral / Gemini LLM |
-| **CriticAgent** | Async post-mortem, trade score 0–10 | Groq (Llama 3) / Mistral / Gemini LLM |
-| **RiskManager** | Pre-trade veto: kill switch, payoff, spread, session | Rule-based |
+Gold behaves differently across the trading day. The engine detects which session is active and applies the optimal strategy:
+
+| Session | UTC Hours | Regime | Strategy | Why It Works |
+|---------|-----------|--------|----------|--------------|
+| **Asian** | 22:00–08:00 | `MEAN_REVERT` | RSI fade at range extremes | Low institutional volume → mean-reverting behavior |
+| **London** | 08:00–13:00 | `BREAKOUT` | Asian range breakout | Institutions enter → price breaks overnight range |
+| **New York** | 13:00–17:00 | `MOMENTUM` | EMA20/50 trend pullback | Momentum continuation from London move |
+| **NY Afternoon** | 17:00–22:00 | `FLAT` | No new trades, flatten all | Declining liquidity → whipsaw risk |
+
+#### Asian Range Backfill
+If the bot starts mid-session (e.g. during London), it automatically **backfills the Asian range** from historical M5 data. This ensures the London BREAKOUT strategy always has a valid high/low range to work with.
+
+### Edge #2 — Macro Filter (DXY + VIX)
+
+The engine polls DXY (US Dollar Index) and VIX (Volatility Index) to classify the macro environment and filter out low-edge trades:
+
+| Macro Regime | Condition | Action |
+|-------------|-----------|--------|
+| **SAFE_HAVEN** | VIX ≥ 25 | Favor longs only, full size |
+| **HEADWIND** | DXY spiking + VIX < 20 | Shorts only, 50% size |
+| **CHOP** | DXY flat + VIX 15–20 | **Block all trades** — no edge |
+| **NEUTRAL** | Otherwise | Both directions, full size |
+
+### Edge #3 — Liquidity Sweep Detection
+
+Detects institutional **stop-hunt** patterns at Previous Day High/Low levels. When price spikes through a key level and reverses, the engine fades the move for a high-conviction reversal trade (score 9).
 
 ---
 
-## 🚀 Key Features
+## 📐 Entry Logic — Big Trade Mode
 
-### 📡 All-Symbol Scanning
-- **Auto-detects** all tradeable pairs on the connected Exness account at startup via `detect_available_symbols()`
-- Filters out trade-disabled reference symbols (e.g., BTCKRW) and exotic quote currencies automatically
-- No hardcoded symbol list — adapts to whatever the broker provides
+The engine prioritizes **quality over quantity**: fewer trades, bigger winners.
 
-### ⚡ Scalping Engine
-- **M1 timeframe** with multi-timeframe confirmation (M5, H1, H4 trend filters)
-- Session gate — Forex: London (07–10 UTC) & NY (13–16 UTC) only; **Crypto exempt** (24/7)
-- Minimum ATR volatility threshold — skips dead markets
-- ATR-based dynamic SL/TP (`ATR_SL_MULTIPLIER` × ATR, `ATR_TP_MULTIPLIER` × ATR)
-- Walk-forward optimised parameters (`optimize_walkforward.py`)
+### London BREAKOUT (Score 7–8)
+```
+Conditions:
+  ✓ Price breaks Asian High + 0.3×ATR (or Asian Low − 0.3×ATR)
+  ✓ M5 MACD confirms direction
+  ✓ H1 trend aligns (EMA20 + MACD + RSI on H1)
+  ✓ RSI not overbought/oversold
+  ✓ Volume surge boosts score to 8
 
-### 🛡️ Institutional Risk Management
-| Feature | Detail |
-|---------|--------|
-| **Kill Switch** | Auto-disables symbol after sustained losses (configurable threshold) |
-| **Payoff Mandate** | Blocks symbols where AvgLoss > 2× AvgWin historically |
-| **Risk Override** | Whitelist key pairs (EURUSD, GBPUSD, BTCUSD…) to always allow |
-| **ATR Position Sizing** | Kelly-adjusted lot size based on account equity and SL distance |
-| **Daily Trade Limit** | Caps total trades per day |
-| **Daily Loss Limit** | Hard stop on total daily drawdown |
-| **Partial Close / Breakeven** | Locks in profit at 0.8R, closes 25% at first TP |
-| **Trailing Stop** | ATR-based — activates at 2× ATR profit, trails 0.5× ATR |
-| **News Blackout** | Skips pairs during high-impact calendar events |
-| **Fake News Detection** | 5-signal credibility scorer discounts suspicious news before it influences trades |
-| **Spread Gate** | Skips pairs with spread > configurable max |
-| **NEUTRAL Guard** | Hard block — only BUY or SELL can be executed |
-| **Adaptive Position Management** | Real-time ML-based position optimization (hold/expand/close) |
+  SL: 2.0× ATR    TP: 6.0× ATR    R:R ≈ 3:1
+```
 
-### 📊 React Dashboard (Real-Time)
-- Vite + React live dashboard auto-launches when the bot starts
-- Connects via WebSocket (`ws://localhost:8000/ws`) + REST polling every 5s
-- **5 panels**: Account stats · Scanner grid (all pairs) · Open positions (live P&L) · Trade feed · Event log
-- REST endpoints: `/api/account` `/api/positions` `/api/trades` `/api/scan` `/api/state`
-- Positions fetched **live from MT5** on every REST call (not stale cache)
+### NY MOMENTUM Pullback (Score 7–8)
+```
+Conditions:
+  ✓ EMA20 > EMA50 (uptrend structure) or EMA20 < EMA50 (downtrend)
+  ✓ Price within 1.5× ATR of EMA20 (pullback zone)
+  ✓ M5 MACD confirms direction
+  ✓ H1 trend aligns
+  ✓ RSI in healthy range (45–70 for longs, 30–55 for shorts)
 
-### 🤖 Adaptive Position Management
+  SL: 1.5× ATR    TP: 5.0× ATR    R:R ≈ 3.3:1
+```
 
-The system now includes intelligent position management that uses real-time ML predictions to optimize profits:
+### NY MOMENTUM Continuation (Score 7)
+```
+Conditions:
+  ✓ EMA20 > EMA50 + price above EMA20
+  ✓ M5 MACD confirms
+  ✓ H1 trend CONFIRMS (not just neutral)
+  ✓ RSI 55–75 (longs) or 25–45 (shorts)
 
-**Key Features**:
-- **Real-time Analysis**: Continuously evaluates open positions using ML models
-- **Dynamic Position Sizing**: Expands winning positions when market conditions are favorable
-- **Profit Protection**: Automatically closes or partially closes positions based on ML predictions
-- **Trend Alignment**: Holds positions longer when trend and ML signals align
-- **Risk Management**: Closes positions when opposing signals are detected
+  SL: 2.0× ATR    TP: 5.0× ATR    R:R ≈ 2.5:1
+```
 
-### 🔍 Pre-Trade Analysis with RAG
+### Asian MEAN REVERSION (Score 7)
+```
+Conditions:
+  ✓ Price at Asian range extreme (high or low)
+  ✓ RSI overbought (>70) or oversold (<30)
+  ✓ Below-median volume (no institutional activity)
 
-Advanced pre-trade analysis system that prevents poor entry timing:
+  SL: 1.5× ATR    TP: mid-range distance or 3× ATR
+```
 
-**Key Features**:
-- **Multi-Timeframe Trend Analysis**: Analyzes trends across M1, M5, M15, H1, H4
-- **ML-Based Entry Validation**: Uses Random Forest and XGBoost for entry confirmation
-- **RAG Historical Context**: Retrieves similar historical patterns for context
-- **Volatility Assessment**: Evaluates current market volatility for risk management
-- **Momentum Analysis**: Checks RSI, MACD, and other momentum indicators
-- **Regime Awareness**: Adjusts decisions based on market regime (Risk-On/Risk-Off)
+---
 
-### 🛡️ Fake News Detection
+## 🛡️ Risk Management
 
-Multi-signal credibility engine that prevents the bot from acting on manipulated or unverified news:
+Hard-coded survival rules — non-negotiable:
 
-| Signal | Weight | What It Checks |
-|--------|--------|----------------|
-| **Source Reputation** | 25% | Tiered whitelist (Reuters/Bloomberg → 1.0, Twitter/Telegram → 0.2) |
-| **Cross-Source Corroboration** | 25% | Same claim reported by multiple independent sources |
-| **Gemini AI Verification** | 20% | LLM plausibility check against current market conditions |
-| **Linguistic Red Flags** | 15% | Clickbait, ALL-CAPS, sensationalism, hype language |
-| **Temporal Consistency** | 15% | Event timing vs business hours (weekend Fed = suspicious) |
+| Rule | Setting | Purpose |
+|------|---------|---------|
+| **Max Risk Per Trade** | 1% of equity | Single trade can't hurt you |
+| **Max Effective Leverage** | 1:20 (code-enforced) | Ignores broker's 1:1000 |
+| **Daily Loss Limit** | 3% equity or $50 USD | Bot shuts down until next day |
+| **Kill Switch** | 3 consecutive losses | 50% size reduction for 24h |
+| **Min R:R Ratio** | 2.5:1 | Every trade must justify the risk |
+| **Min Confluence Score** | 7 | Only high-conviction signals pass |
+| **Max Daily Trades** | 5 | Quality over quantity |
+| **Max Open Positions** | 2 | Focus capital on best setups |
+| **Spread Gate** | 5 pips max on Gold | Avoids wide-spread entries |
+| **Cooldown** | 300s between trades | Prevents revenge trading |
 
-- Credibility score < 0.4 → news weight reduced from 70% to 7%
-- Configurable via `FAKE_NEWS_MIN_CREDIBILITY` and `FAKE_NEWS_DISCOUNT_FACTOR`
+### Smart Exit System
+- **Trailing Stop**: 2.0× ATR behind price (ratchet — only moves in your favor)
+- **Breakeven Move**: SL moves to entry + buffer after 1.0× ATR profit
+- **Partial Close**: 30% of position closed at breakeven (lock risk-free profit)
+- **Early Loss Cut**: Closes losers early when momentum reverses
+- **Safety TP**: Emergency take-profit at 15× ATR (rarely hit — trailing handles it)
 
-**Decision Process**:
-1. **Trend Capture**: Ensures alignment across multiple timeframes
-2. **ML Validation**: Confirms entry with ensemble ML models
-3. **RAG Context**: Checks historical performance of similar patterns
-4. **Risk Assessment**: Evaluates volatility and momentum conditions
-5. **Final Decision**: Weighted scoring system determines entry approval
+---
 
-**Decision Logic**:
-- ML prediction confidence and direction
-- Current trend strength and alignment
-- Market volatility assessment
-- Position profit/loss in pips
-- Risk-reward ratio
+## 🏗️ Architecture
 
-**Actions Taken**:
-- **HOLD**: Keep position when conditions are favorable
-- **EXPAND**: Increase position size for strong winning trades
-- **PARTIAL_CLOSE**: Lock in profits while maintaining exposure
-- **CLOSE**: Exit positions when conditions turn unfavorable
+Event-driven microservices communicating through an async EventBus:
 
-### 📱 Telegram Alerts (@vcrpttrade_bot)
-Real-time push notifications — non-blocking, never slows the trading loop:
+```
+main_async.py
+│
+├── Core
+│   ├── EventBus              — Async pub/sub message broker
+│   └── MT5Gateway            — Thread-safe MT5 API proxy
+│
+├── Data Layer
+│   └── MarketDataService     — Fetches M5/H1 candles, publishes MARKET_DATA_READY
+│
+├── Strategy Layer (3 Edges)
+│   ├── SessionRegimeService  — Detects session + tracks Asian range + PDH/PDL
+│   ├── SessionStrategyService — Generates BUY/SELL signals per regime
+│   ├── MacroFilterService    — DXY/VIX polling + regime classification
+│   └── LiquiditySweepService — PDH/PDL stop-hunt detection
+│
+├── Decision Layer
+│   ├── CoordinatorService    — Orchestrates scan cycles, emits TRADE_CANDIDATE
+│   └── RiskService           — Hardened risk gatekeeper → TRADE_APPROVED
+│
+├── Execution Layer
+│   ├── ExecutionService      — Places market/limit orders on MT5
+│   └── TradeManagerService   — Trailing stops, breakeven, partial closes
+│
+├── Intelligence Layer
+│   ├── GemmaBrainService     — AI trade vetting (optional)
+│   └── NewsTradingService    — News event breakout/straddle trading
+│
+└── Output Layer
+    ├── BroadcastService      — WebSocket feed to dashboard
+    ├── TelegramService       — Push notifications
+    └── JournalService        — SQLite trade journal
+```
 
-| Alert | Trigger |
-|-------|---------|
-| 🤖 **Bot Started** | On startup with pair count |
-| 📡 **Scan Signals** | When 1+ candidate pairs found |
-| 🟢🔴 **Trade Executed** | Symbol, direction, lots, price, SL, TP |
-| 🚨 **Kill Switch** | Symbol disabled, loss amount shown |
-| ⚠️ **Generic Alert** | Any custom event |
+### Event Flow
+```
+SCAN_START → MARKET_DATA_READY → SESSION_REGIME_UPDATE + MACRO_FILTER_UPDATE
+  → SESSION_TRADE_SIGNAL / SWEEP_TRADE_SIGNAL → TRADE_CANDIDATE
+  → TRADE_APPROVED → TRADE_EXECUTED → (Journal, Telegram, Dashboard)
+```
 
 ---
 
@@ -158,7 +183,7 @@ cd exness
 pip install -r requirements.txt
 ```
 
-### 2. Install Dashboard Dependencies
+### 2. Install Dashboard
 ```bash
 cd dashboard
 npm install
@@ -173,83 +198,63 @@ MT5_PASSWORD=your_password
 MT5_SERVER=Exness-MT5Real8
 MT5_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
 
-# Trading
-TIMEFRAME=M1
-LOT_SIZE=0.10
+# Trading — Big Trade Mode
+TIMEFRAME=M5
+LOT_SIZE=0.02
 RISK_PERCENT=1.0
 
-# Strategy Tuning (walk-forward optimised)
-ATR_SL_MULTIPLIER=1.0
-ATR_TP_MULTIPLIER=4.0
-MIN_CONFLUENCE_SCORE=2
-RF_PROB_THRESHOLD=0.45
+# Entry Quality — STRICT
+MIN_CONFLUENCE_SCORE=7
+MIN_RISK_REWARD_RATIO=2.5
+BREAKOUT_ATR_MULTIPLIER=0.3
+
+# Trade Limits
+COOLDOWN_SECONDS=300
+MAX_DAILY_TRADES=5
+MAX_OPEN_POSITIONS=2
+
+# H1 Trend Confirmation
+H1_TREND_FILTER=True
+
+# Smart Exit — Let Winners Run
+SMART_EXIT_ENABLED=True
+TRAIL_ACTIVATE_ATR=1.0
+TRAILING_ATR_MULTIPLIER=2.0
+TP_SAFETY_ATR=15.0
 
 # Risk
-MAX_DAILY_TRADES=20
 MAX_DAILY_LOSS_USD=50
-SCALP_SESSION_FILTER=True
-
-# Fake News Detection
-FAKE_NEWS_DETECTION_ENABLED=True
-FAKE_NEWS_MIN_CREDIBILITY=0.4
-FAKE_NEWS_DISCOUNT_FACTOR=0.1
-
-# AI (at least one required for ResearcherAgent)
-GROQ_API_KEY=your_groq_key
-MISTRAL_API_KEY=your_mistral_key
 
 # Telegram
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
 
-### 4. Get Telegram Chat ID
-```bash
-# 1. Message /start to your bot on Telegram
-# 2. Run:
-python f:\mt5\utils\telegram_notifier.py
-# → prints your Chat ID to paste into .env
-```
-
-### 5. Train ML Models
-```bash
-python train_model.py                   # Random Forest
-python train_xgboost.py                 # XGBoost
-python train_tabtransformer.py          # TabTransformer (Attention-based tabular)
-python train_sequence_transformer.py    # Sequence Transformer (High ROI Temporal Attention)
-python train_lstm.py                    # LSTM (optional)
-```
-
-### 6. (Optional) Walk-Forward Optimisation
-```bash
-python optimize_walkforward.py
-# → writes optimal params to models/best_params.json and updates .env
-```
-
----
-
-## 🖥️ Usage
-
-### 🟢 Start the Bot
+### 4. Start the Bot
 ```bash
 python main_async.py
 ```
 
 This will:
-1. Connect to MT5 and detect all available symbols
-2. Start the FastAPI WebSocket server on port 8000
+1. Connect to MT5 and auto-detect XAUUSD symbol (with broker suffix)
+2. Backfill Asian range from historical M5 data if starting mid-session
 3. Auto-launch the React dashboard at `http://localhost:5173`
-4. Send a Telegram startup notification
-5. Begin scanning all pairs every ~180s
+4. Begin session-aware scan cycles every 300s
+5. Send Telegram alerts on trades
 
-### 🔍 Diagnostics
-| Script | Purpose |
-|--------|---------|
-| `debug_scan.py` | Single-pass scan of all agents |
-| `debug_async.py` | Test async loop with mock data |
-| `debug_gemini.py` | Test AI connectivity |
-| `debug_researcher.py` | Test Bull/Bear debate |
-| `debug_execution.py` | Test order placement |
+---
+
+## 📊 React Dashboard
+
+Real-time monitoring via Vite + React, auto-launches on bot startup:
+
+- **Account Stats**: Balance, equity, daily P&L
+- **Scanner Status**: Current session, regime, macro filter, Asian range
+- **Open Positions**: Live P&L with trailing stop visualization
+- **Trade Feed**: Recent entries/exits with scores and reasons
+- **Event Log**: Full event bus activity
+
+Connects via WebSocket (`ws://localhost:8000/ws`) + REST polling.
 
 ---
 
@@ -257,57 +262,88 @@ This will:
 
 ```
 mt5/
-├── main_async.py              # Entry point — connects MT5, starts server + dashboard
-├── config/settings.py         # All configuration (loaded from .env)
+├── main_async.py                  # Entry point — MT5 + dashboard + scan loop
+├── config/settings.py             # All configuration (loaded from .env)
+│
+├── core/
+│   ├── event_bus.py               # Async pub/sub EventBus
+│   ├── base_service.py            # Service lifecycle management
+│   └── mt5_gateway.py             # Thread-safe MT5 API proxy
+│
+├── services/
+│   ├── coordinator.py             # Scan orchestrator
+│   ├── session_regime_service.py  # Session detection + Asian range tracking
+│   ├── session_strategy_service.py # Signal generation per regime
+│   ├── macro_filter_service.py    # DXY/VIX macro filter
+│   ├── liquidity_sweep_service.py # PDH/PDL stop-hunt detector
+│   ├── market_data_service.py     # M5/H1 data fetcher
+│   ├── risk_service.py            # Hardened risk gatekeeper
+│   ├── execution_service.py       # MT5 order placement
+│   ├── trade_manager_service.py   # Trailing/BE/partial close manager
+│   ├── gemma_brain_service.py     # AI trade vetting (optional)
+│   ├── news_trading_service.py    # News event trading
+│   ├── broadcast_service.py       # WebSocket dashboard feed
+│   ├── telegram_service.py        # Telegram notifications
+│   └── journal_service.py         # SQLite trade journal
 │
 ├── strategy/
-│   ├── institutional_strategy.py  # Orchestrator — scan loop, trade execution, events
-│   ├── pair_agent.py              # Per-symbol agent
-│   └── features.py                # Technical feature engineering
-│
-├── analysis/
-│   ├── market_analyst.py      # Macro regime classification (LLM)
-│   ├── quant_agent.py         # SMC + ML confluence scoring
-│   ├── researcher_agent.py    # Bull vs Bear LLM debate
-│   ├── critic_agent.py        # Post-trade review
-│   ├── fake_news_detector.py  # 5-signal news credibility scorer
-│   ├── sentiment_analyzer.py  # Combined news + technical sentiment
-│   └── gemini_news_analyzer.py # Gemini AI news analysis
+│   ├── features.py                # Technical feature engineering
+│   ├── institutional_strategy.py  # Legacy orchestrator
+│   └── ...                        # ML predictors (XGBoost, LSTM, etc.)
 │
 ├── utils/
-│   ├── risk_manager.py        # Kill switch, payoff mandate, position sizing
-│   ├── telegram_notifier.py   # Telegram push alerts
-│   ├── trade_journal.py       # SQLite trade log
-│   ├── news_filter.py         # High-impact news blackout
-│   └── data_cache.py          # In-memory market data cache
+│   ├── risk_manager.py            # Position sizing, kill switch, payoff mandate
+│   ├── news_filter.py             # Economic calendar blackout
+│   └── correlation_filter.py      # Portfolio correlation check
 │
-├── api/
-│   └── stream_server.py       # FastAPI WebSocket + REST API (port 8000)
-│
-├── dashboard/                 # React + Vite frontend
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── hooks/useBotWebSocket.js
-│   │   └── components/
-│   │       ├── AccountCard.jsx
-│   │       ├── ScannerGrid.jsx
-│   │       ├── PositionsTable.jsx
-│   │       ├── TradeFeed.jsx
-│   │       └── EventLog.jsx
-│   └── package.json
+├── dashboard/                     # React + Vite frontend
+│   └── src/
+│       ├── App.jsx
+│       └── components/
 │
 ├── execution/
-│   └── mt5_client.py          # MT5 order placement, symbol detection
+│   └── mt5_client.py              # Low-level MT5 operations
 │
-├── market_data/loader.py      # OHLCV data fetching
-├── optimize_walkforward.py    # Rolling in-sample/OOS parameter search
-├── train_model.py             # Random Forest trainer
-├── train_xgboost.py           # XGBoost trainer
-└── train_lstm.py              # LSTM trainer
+└── market_data/
+    └── loader.py                  # OHLCV data fetching
 ```
+
+---
+
+## 📱 Telegram Alerts
+
+Real-time push notifications via `@vcrpttrade_bot`:
+
+| Alert | Trigger |
+|-------|---------|
+| 🤖 **Bot Started** | Startup with symbol count and session |
+| 📡 **Trade Signal** | Candidate found with score and reason |
+| 🟢🔴 **Trade Executed** | Symbol, direction, lot, price, SL, TP |
+| ⚠️ **Kill Switch** | Consecutive losses — size reduced |
+| 🛑 **Daily Limit** | 3% loss hit — shutdown until tomorrow |
+| 📊 **Session Change** | Session transition (e.g. London → NY) |
+
+---
+
+## ⚙️ Key Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `BREAKOUT_ATR_MULTIPLIER` | 0.3 | How far beyond Asian range = confirmed breakout |
+| `MIN_CONFLUENCE_SCORE` | 7 | Minimum signal quality to trade (scores 6–9) |
+| `MIN_RISK_REWARD_RATIO` | 2.5 | Minimum reward:risk ratio |
+| `TRAILING_ATR_MULTIPLIER` | 2.0 | Trailing stop distance behind price |
+| `TRAIL_ACTIVATE_ATR` | 1.0 | Start trailing after 1× ATR profit |
+| `BREAKEVEN_ACTIVATE_ATR` | 1.0 | Move SL to entry after 1× ATR profit |
+| `COOLDOWN_SECONDS` | 300 | Minimum seconds between trades |
+| `MAX_DAILY_TRADES` | 5 | Hard cap on daily trade count |
+| `MAX_EFFECTIVE_LEVERAGE` | 20 | Code-enforced leverage cap (ignores broker) |
+| `H1_TREND_FILTER` | True | Require H1 timeframe trend confirmation |
+| `MACRO_FILTER_ENABLED` | True | Enable DXY/VIX regime filtering |
+| `SWEEP_ENABLED` | True | Enable liquidity sweep detection |
 
 ---
 
 ## ⚠️ Disclaimer
 
-**Institutional Swarm** is provided for educational and research purposes only. Financial trading involves significant risk of capital loss. Past performance is not indicative of future results. The authors bear no responsibility for your trading decisions.
+This software is provided for **educational and research purposes only**. Financial trading involves significant risk of capital loss. Past performance is not indicative of future results. The authors bear no responsibility for trading decisions made using this system.
