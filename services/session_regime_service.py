@@ -19,6 +19,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
 
+import pandas as pd
+
 from core.event_bus import EventBus, Event, EventTypes
 from core.base_service import BaseService
 from core.mt5_gateway import MT5Gateway
@@ -85,6 +87,9 @@ class SessionRegimeService(BaseService):
         self.bus.subscribe(EventTypes.MARKET_DATA_READY, self._on_market_data)
         self.bus.subscribe(EventTypes.SCAN_START, self._on_scan_start)
 
+        # Backfill Asian range from historical data if bot starts mid-session
+        await self._backfill_asian_range()
+
     async def _on_scan_start(self, event: Event):
         """On each scan cycle, detect session and publish regime."""
         session, regime = self._detect_session_regime()
@@ -112,9 +117,11 @@ class SessionRegimeService(BaseService):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
+        asian_lo_str = f"{self._asian_low:.2f}" if self._asian_low < float('inf') else "N/A"
+        asian_hi_str = f"{self._asian_high:.2f}" if self._asian_high > 0 else "N/A"
         logger.info(
             f"[SESSION] {session} → {regime} | "
-            f"Asian Range: {self._asian_high:.2f}-{self._asian_low:.2f} | "
+            f"Asian Range: {asian_lo_str}-{asian_hi_str} | "
             f"ATR: {self._current_atr:.2f}"
         )
 
@@ -274,6 +281,98 @@ class SessionRegimeService(BaseService):
                     self._prev_day_low = float(daily['low'].iloc[-2])
         except Exception:
             pass
+
+    # ─── Asian Range Backfill ─────────────────────────────────────────────
+
+    async def _backfill_asian_range(self):
+        """Backfill Asian session high/low from historical M5 data.
+
+        This is critical when the bot starts after the Asian session has ended
+        (e.g. during London or NY). Without this, the London BREAKOUT strategy
+        has no Asian range to break out of and will never generate signals.
+        """
+        session, _ = self._detect_session_regime()
+        now_utc = datetime.now(timezone.utc)
+        today_str = now_utc.strftime("%Y-%m-%d")
+
+        # Already have a valid range for today — skip
+        if (self._asian_range_date == today_str and
+                self._asian_high > 0 and self._asian_low < float('inf')):
+            logger.info("[BACKFILL] Asian range already populated — skipping")
+            return
+
+        # Determine the Asian session window to scan:
+        #   Asian session = 22:00 UTC (previous day) to 08:00 UTC (today)
+        asian_start_h = getattr(settings, 'ASIAN_SESSION_START', 22.0)
+        asian_end_h = getattr(settings, 'ASIAN_SESSION_END', 8.0)
+
+        # The Asian session that feeds today's London starts the evening before
+        asian_start_dt = (now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+                          - timedelta(days=1)
+                          + timedelta(hours=asian_start_h))
+        asian_end_dt = now_utc.replace(hour=int(asian_end_h), minute=0,
+                                       second=0, microsecond=0)
+
+        # If we're still in Asian session, end at current time (partial fill)
+        if session == "ASIAN":
+            asian_end_dt = now_utc
+
+        # Find the XAUUSD symbol name (may have suffix like XAUUSDm)
+        xau_symbol = None
+        for sym in settings.SYMBOLS:
+            if "XAU" in sym.upper():
+                xau_symbol = sym
+                break
+
+        if not xau_symbol:
+            logger.warning("[BACKFILL] No XAUUSD symbol found in SYMBOLS list")
+            return
+
+        try:
+            # Fetch enough M5 bars to cover ~10 hours (22:00-08:00 = 10h = 120 bars)
+            rates = await self.gateway.get_rates(xau_symbol, "M5", 300)
+            if rates is None or len(rates) == 0:
+                logger.warning("[BACKFILL] No M5 data returned from MT5")
+                return
+
+            df = pd.DataFrame(rates)
+            df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
+
+            # Filter to Asian session window
+            mask = (df['time'] >= asian_start_dt) & (df['time'] <= asian_end_dt)
+            asian_df = df[mask]
+
+            if asian_df.empty:
+                logger.warning(
+                    f"[BACKFILL] No M5 bars found in Asian window "
+                    f"{asian_start_dt.strftime('%H:%M')}-{asian_end_dt.strftime('%H:%M')} UTC"
+                )
+                return
+
+            backfill_high = float(asian_df['high'].max())
+            backfill_low = float(asian_df['low'].min())
+
+            if backfill_high <= 0 or backfill_low <= 0:
+                logger.warning("[BACKFILL] Invalid price data in Asian window")
+                return
+
+            self._asian_high = backfill_high
+            self._asian_low = backfill_low
+            self._asian_range_date = today_str
+
+            # Lock the range if Asian session is over
+            if session != "ASIAN":
+                self._asian_range_locked = True
+
+            range_size = backfill_high - backfill_low
+            logger.info(
+                f"[BACKFILL] Asian Range RECOVERED from {len(asian_df)} M5 bars: "
+                f"{backfill_low:.2f} - {backfill_high:.2f} "
+                f"(range: {range_size:.2f}) | locked={self._asian_range_locked}"
+            )
+
+        except Exception as e:
+            logger.error(f"[BACKFILL] Failed to backfill Asian range: {e}")
 
     # ─── Public Accessors ─────────────────────────────────────────────────
 
