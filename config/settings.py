@@ -389,3 +389,11 @@ BACKTEST_RISK_PERCENT = float(os.getenv("BACKTEST_RISK_PERCENT", 1.0))     # Ris
 VOLUME_CONFIRMATION_MULTIPLIER = float(os.getenv("VOLUME_CONFIRMATION_MULTIPLIER", 1.5))  # Volume must exceed N x 20-period average for breakout confirmation
 SIGNAL_DECAY_CANDLES = int(os.getenv("SIGNAL_DECAY_CANDLES", 2))  # Cancel pending signals not filled within N candles (N * 5 min for M5)
 MTF_ALIGNMENT_REQUIRED = os.getenv("MTF_ALIGNMENT_REQUIRED", "True").lower() == "true"  # Require M5+M15+H1 agreement for max score
+
+# ─── Performance Analytics Settings ──────────────────────────────────────
+PERF_ROLLING_WINDOW = int(os.getenv("PERF_ROLLING_WINDOW", 20))
+PERF_MIN_WIN_RATE = float(os.getenv("PERF_MIN_WIN_RATE", 0.35))
+PERF_MIN_SHARPE = float(os.getenv("PERF_MIN_SHARPE", -0.5))
+PERF_DEGRADED_SIZE_FACTOR = float(os.getenv("PERF_DEGRADED_SIZE_FACTOR", 0.5))
+PERF_RECOVERY_SIZE_FACTOR = float(os.getenv("PERF_RECOVERY_SIZE_FACTOR", 0.75))
+PERF_CONSECUTIVE_LOSS_THRESHOLD = int(os.getenv("PERF_CONSECUTIVE_LOSS_THRESHOLD", 5))
