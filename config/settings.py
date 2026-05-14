@@ -378,3 +378,9 @@ MASSIVE_S3_ENDPOINT = os.getenv("MASSIVE_S3_ENDPOINT", "https://files.massive.co
 MASSIVE_S3_BUCKET = os.getenv("MASSIVE_S3_BUCKET", "flatfiles")
 MASSIVE_WS_ENABLED = os.getenv("MASSIVE_WS_ENABLED", "True").lower() == "true"  # Real-time WebSocket feed
 MASSIVE_REST_FALLBACK = os.getenv("MASSIVE_REST_FALLBACK", "True").lower() == "true"  # Use REST when MT5 fails
+
+# ─── Backtesting Settings ────────────────────────────────────────────────
+BACKTEST_SPREAD_PIPS = float(os.getenv("BACKTEST_SPREAD_PIPS", 2.0))       # Default spread for XAUUSD backtest
+BACKTEST_SLIPPAGE_PIPS = float(os.getenv("BACKTEST_SLIPPAGE_PIPS", 0.5))   # Default slippage
+BACKTEST_INITIAL_EQUITY = float(os.getenv("BACKTEST_INITIAL_EQUITY", 10000.0))  # Starting equity
+BACKTEST_RISK_PERCENT = float(os.getenv("BACKTEST_RISK_PERCENT", 1.0))     # Risk per trade (%)
