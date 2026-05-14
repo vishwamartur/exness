@@ -149,7 +149,7 @@ MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0))
 
 # Kelly Criterion
 USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.5))
 KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))
 
 # Cost Awareness
@@ -397,3 +397,11 @@ PERF_MIN_SHARPE = float(os.getenv("PERF_MIN_SHARPE", -0.5))
 PERF_DEGRADED_SIZE_FACTOR = float(os.getenv("PERF_DEGRADED_SIZE_FACTOR", 0.5))
 PERF_RECOVERY_SIZE_FACTOR = float(os.getenv("PERF_RECOVERY_SIZE_FACTOR", 0.75))
 PERF_CONSECUTIVE_LOSS_THRESHOLD = int(os.getenv("PERF_CONSECUTIVE_LOSS_THRESHOLD", 5))
+
+# ─── Enhanced Risk Management Settings ───────────────────────────────────
+MAX_PORTFOLIO_HEAT_PERCENT = float(os.getenv("MAX_PORTFOLIO_HEAT_PERCENT", 3.0))
+SESSION_CLOSE_RISK_REDUCTION = float(os.getenv("SESSION_CLOSE_RISK_REDUCTION", 0.3))
+DYNAMIC_DAILY_LIMIT_ENABLED = os.getenv("DYNAMIC_DAILY_LIMIT_ENABLED", "True").lower() == "true"
+DRAWDOWN_TIER_1_PERCENT = float(os.getenv("DRAWDOWN_TIER_1_PERCENT", 1.0))
+DRAWDOWN_TIER_2_PERCENT = float(os.getenv("DRAWDOWN_TIER_2_PERCENT", 2.0))
+DRAWDOWN_SHUTDOWN_PERCENT = float(os.getenv("DRAWDOWN_SHUTDOWN_PERCENT", 2.5))
