@@ -87,6 +87,9 @@ class EventTypes:
     PERFORMANCE_ALERT       = "PERFORMANCE_ALERT"
     PERFORMANCE_SIZE_UPDATE = "PERFORMANCE_SIZE_UPDATE"
 
+    # Trade Quality
+    TRADE_QUALITY_GRADED    = "TRADE_QUALITY_GRADED"
+
     # Dashboard-compatible (backward compat)
     ACCOUNT_UPDATE     = "ACCOUNT_UPDATE"
     POSITION_UPDATE    = "POSITION_UPDATE"
@@ -135,6 +138,9 @@ _EVENT_PRIORITY: Dict[str, EventPriority] = {
     # Performance Analytics
     EventTypes.PERFORMANCE_ALERT:       EventPriority.ANALYSIS,
     EventTypes.PERFORMANCE_SIZE_UPDATE: EventPriority.ANALYSIS,
+
+    # Trade Quality
+    EventTypes.TRADE_QUALITY_GRADED:    EventPriority.ANALYSIS,
 
     EventTypes.SCAN_START:         EventPriority.OUTPUT,
     EventTypes.SCAN_COMPLETE:      EventPriority.OUTPUT,
