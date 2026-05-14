@@ -417,9 +417,28 @@ class RiskManager:
 
         return False, ""
 
+    def calculate_kelly_fraction(self, win_rate, avg_win, avg_loss):
+        """
+        Calculate the raw Kelly fraction before applying the KELLY_FRACTION multiplier.
+        
+        Kelly formula: f* = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
+        
+        Args:
+            win_rate: Historical win rate (0.0 to 1.0)
+            avg_win: Average winning trade profit
+            avg_loss: Average losing trade loss (positive number)
+            
+        Returns:
+            Raw Kelly fraction (can be negative if edge is negative), clamped to >= 0
+        """
+        if avg_win <= 0:
+            return 0.0
+        kelly_f = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
+        return max(0.0, kelly_f)
+
     def calculate_position_size(self, symbol, sl_pips, confluence_score, scaling_factor=1.0, ml_prob=None, emotion_state='NEUTRAL', emotion_score=0.5):
         """
-        Calculates dynamic lot size using Quarter-Kelly when history available.
+        Calculates dynamic lot size using Half-Kelly when history available.
         Falls back to confluence tiers when insufficient trade history.
         
         ml_prob: float (0-1) — ML ensemble predicted win probability.

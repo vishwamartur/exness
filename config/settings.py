@@ -149,7 +149,7 @@ MIN_RISK_REWARD_RATIO = float(os.getenv("MIN_RISK_REWARD_RATIO", 2.0))
 
 # Kelly Criterion
 USE_KELLY = os.getenv("USE_KELLY", "True").lower() == "true"
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.25))
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", 0.5))
 KELLY_MIN_TRADES = int(os.getenv("KELLY_MIN_TRADES", 20))
 
 # Cost Awareness
@@ -378,3 +378,45 @@ MASSIVE_S3_ENDPOINT = os.getenv("MASSIVE_S3_ENDPOINT", "https://files.massive.co
 MASSIVE_S3_BUCKET = os.getenv("MASSIVE_S3_BUCKET", "flatfiles")
 MASSIVE_WS_ENABLED = os.getenv("MASSIVE_WS_ENABLED", "True").lower() == "true"  # Real-time WebSocket feed
 MASSIVE_REST_FALLBACK = os.getenv("MASSIVE_REST_FALLBACK", "True").lower() == "true"  # Use REST when MT5 fails
+
+# ─── Backtesting Settings ────────────────────────────────────────────────
+BACKTEST_SPREAD_PIPS = float(os.getenv("BACKTEST_SPREAD_PIPS", 2.0))       # Default spread for XAUUSD backtest
+BACKTEST_SLIPPAGE_PIPS = float(os.getenv("BACKTEST_SLIPPAGE_PIPS", 0.5))   # Default slippage
+BACKTEST_INITIAL_EQUITY = float(os.getenv("BACKTEST_INITIAL_EQUITY", 10000.0))  # Starting equity
+BACKTEST_RISK_PERCENT = float(os.getenv("BACKTEST_RISK_PERCENT", 1.0))     # Risk per trade (%)
+
+# ─── Adaptive Signal Scoring ─────────────────────────────────────────────
+VOLUME_CONFIRMATION_MULTIPLIER = float(os.getenv("VOLUME_CONFIRMATION_MULTIPLIER", 1.5))  # Volume must exceed N x 20-period average for breakout confirmation
+SIGNAL_DECAY_CANDLES = int(os.getenv("SIGNAL_DECAY_CANDLES", 2))  # Cancel pending signals not filled within N candles (N * 5 min for M5)
+MTF_ALIGNMENT_REQUIRED = os.getenv("MTF_ALIGNMENT_REQUIRED", "True").lower() == "true"  # Require M5+M15+H1 agreement for max score
+
+# ─── Performance Analytics Settings ──────────────────────────────────────
+PERF_ROLLING_WINDOW = int(os.getenv("PERF_ROLLING_WINDOW", 20))
+PERF_MIN_WIN_RATE = float(os.getenv("PERF_MIN_WIN_RATE", 0.35))
+PERF_MIN_SHARPE = float(os.getenv("PERF_MIN_SHARPE", -0.5))
+PERF_DEGRADED_SIZE_FACTOR = float(os.getenv("PERF_DEGRADED_SIZE_FACTOR", 0.5))
+PERF_RECOVERY_SIZE_FACTOR = float(os.getenv("PERF_RECOVERY_SIZE_FACTOR", 0.75))
+PERF_CONSECUTIVE_LOSS_THRESHOLD = int(os.getenv("PERF_CONSECUTIVE_LOSS_THRESHOLD", 5))
+
+# ─── Enhanced Risk Management Settings ───────────────────────────────────
+MAX_PORTFOLIO_HEAT_PERCENT = float(os.getenv("MAX_PORTFOLIO_HEAT_PERCENT", 3.0))
+SESSION_CLOSE_RISK_REDUCTION = float(os.getenv("SESSION_CLOSE_RISK_REDUCTION", 0.3))
+DYNAMIC_DAILY_LIMIT_ENABLED = os.getenv("DYNAMIC_DAILY_LIMIT_ENABLED", "True").lower() == "true"
+DRAWDOWN_TIER_1_PERCENT = float(os.getenv("DRAWDOWN_TIER_1_PERCENT", 1.0))
+DRAWDOWN_TIER_2_PERCENT = float(os.getenv("DRAWDOWN_TIER_2_PERCENT", 2.0))
+DRAWDOWN_SHUTDOWN_PERCENT = float(os.getenv("DRAWDOWN_SHUTDOWN_PERCENT", 2.5))
+
+# ─── Trade Quality Filter Settings ──────────────────────────────────────
+TRADE_QUALITY_FILTER_ENABLED = os.getenv("TRADE_QUALITY_FILTER_ENABLED", "True").lower() == "true"
+NEWS_QUALITY_BUFFER_MINUTES = int(os.getenv("NEWS_QUALITY_BUFFER_MINUTES", 15))
+SPREAD_QUALITY_MULTIPLIER = float(os.getenv("SPREAD_QUALITY_MULTIPLIER", 2.0))
+VOLATILITY_SPIKE_MULTIPLIER = float(os.getenv("VOLATILITY_SPIKE_MULTIPLIER", 3.0))
+ROUND_NUMBER_BUFFER_PIPS = int(os.getenv("ROUND_NUMBER_BUFFER_PIPS", 30))
+ROUND_NUMBER_INTERVAL = int(os.getenv("ROUND_NUMBER_INTERVAL", 100))
+
+# ─── Strategy Parameter Auto-Tuning ─────────────────────────────────────
+AUTO_TUNE_ENABLED = os.getenv("AUTO_TUNE_ENABLED", "False").lower() == "true"
+AUTO_TUNE_TRAIN_MONTHS = int(os.getenv("AUTO_TUNE_TRAIN_MONTHS", 3))
+AUTO_TUNE_TEST_MONTHS = int(os.getenv("AUTO_TUNE_TEST_MONTHS", 1))
+AUTO_TUNE_GUARDRAIL_PCT = float(os.getenv("AUTO_TUNE_GUARDRAIL_PCT", 0.2))
+AUTO_TUNE_MIN_OOS_SHARPE = float(os.getenv("AUTO_TUNE_MIN_OOS_SHARPE", 0.5))
