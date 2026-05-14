@@ -110,7 +110,7 @@ class PerformanceAnalyticsService(BaseService):
         await self._check_degradation()
 
         # Update recovery tracking
-        self._update_recovery_state(trade)
+        await self._update_recovery_state(trade)
 
     def _calculate_rolling_metrics(self, window: Optional[int] = None):
         """
@@ -251,7 +251,7 @@ class PerformanceAnalyticsService(BaseService):
             if old_factor != self._current_size_factor:
                 await self._emit_size_update()
 
-    def _update_recovery_state(self, trade: Dict):
+    async def _update_recovery_state(self, trade: Dict):
         """Track recovery progress after degradation clears."""
         if self._recovering:
             self._recovery_trade_count += 1
@@ -264,12 +264,12 @@ class PerformanceAnalyticsService(BaseService):
 
                 if old_factor != self._current_size_factor:
                     logger.info("Strategy NORMAL: recovery complete, full size restored")
-                    self.emit_sync(EventTypes.PERFORMANCE_ALERT, {
+                    await self.emit(EventTypes.PERFORMANCE_ALERT, {
                         "status": "NORMAL",
                         "metrics": self._current_metrics.copy(),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
-                    self.emit_sync(EventTypes.PERFORMANCE_SIZE_UPDATE, {
+                    await self.emit(EventTypes.PERFORMANCE_SIZE_UPDATE, {
                         "size_factor": self._current_size_factor,
                         "state": "NORMAL",
                         "timestamp": datetime.now(timezone.utc).isoformat(),

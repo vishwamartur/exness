@@ -450,6 +450,10 @@ class ParameterTuner:
         """
         Simulate strategy on a data segment using ATR barrier labeling.
 
+        Evaluates BOTH long and short trades using directional barrier logic:
+        - Long: TP above entry (highs hit tp), SL below entry (lows hit sl)
+        - Short: TP below entry (lows hit tp), SL above entry (highs hit sl)
+
         Returns Sharpe-like score: mean(outcomes) / std(outcomes) * sqrt(N).
         Same approach as optimize_walkforward.py.
 
@@ -474,22 +478,38 @@ class ParameterTuner:
             # Fallback: estimate ATR from high-low range
             atrs = (df_segment['high'] - df_segment['low']).rolling(14).mean().values
 
-        labels = np.zeros(len(df_segment), dtype=int)
+        # Labels: 1 = TP hit (win), 0 = SL hit or neither (loss)
+        # Evaluate both long and short directions
+        long_labels = np.zeros(len(df_segment), dtype=int)
+        short_labels = np.zeros(len(df_segment), dtype=int)
 
         for i in range(len(df_segment) - horizon):
             atr = atrs[i] if (not np.isnan(atrs[i]) and atrs[i] > 0) else 0.0005
-            tp = closes[i] + atr * tp_mult
-            sl = closes[i] - atr * sl_mult
-            hit_tp = np.any(highs[i + 1: i + 1 + horizon] >= tp)
-            hit_sl = np.any(lows[i + 1: i + 1 + horizon] <= sl)
-            if hit_tp and not hit_sl:
-                labels[i] = 1
 
-        if labels.sum() == 0:
+            # Long trade: TP above entry, SL below entry
+            long_tp = closes[i] + atr * tp_mult
+            long_sl = closes[i] - atr * sl_mult
+            long_hit_tp = np.any(highs[i + 1: i + 1 + horizon] >= long_tp)
+            long_hit_sl = np.any(lows[i + 1: i + 1 + horizon] <= long_sl)
+            if long_hit_tp and not long_hit_sl:
+                long_labels[i] = 1
+
+            # Short trade: TP below entry, SL above entry
+            short_tp = closes[i] - atr * tp_mult
+            short_sl = closes[i] + atr * sl_mult
+            short_hit_tp = np.any(lows[i + 1: i + 1 + horizon] <= short_tp)
+            short_hit_sl = np.any(highs[i + 1: i + 1 + horizon] >= short_sl)
+            if short_hit_tp and not short_hit_sl:
+                short_labels[i] = 1
+
+        # Combine both directions
+        combined_labels = np.maximum(long_labels, short_labels)
+
+        if combined_labels.sum() == 0:
             return -999.0
 
         rr = tp_mult / sl_mult
-        outcomes = np.where(labels == 1, rr, -1.0)
+        outcomes = np.where(combined_labels == 1, rr, -1.0)
         std = outcomes.std()
         if std == 0:
             return -999.0

@@ -168,6 +168,11 @@ class TradeQualityFilter(BaseService):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await self.emit(EventTypes.TRADE_QUALITY_GRADED, graded_payload)
+
+        # Re-emit as SESSION_TRADE_SIGNAL with quality_checked flag so the
+        # coordinator (which subscribes to SESSION_TRADE_SIGNAL) receives it.
+        await self.emit(EventTypes.SESSION_TRADE_SIGNAL, graded_payload)
+
         self.logger.info(
             f"[{self.name}] GRADED {symbol} signal: Grade {grade} (session={session})"
         )

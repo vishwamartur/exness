@@ -103,7 +103,21 @@ class BacktestEngine:
         return df.reset_index(drop=True)
 
     def _load_sqlite(self, path: str, table: str) -> pd.DataFrame:
-        """Load OHLCV data from SQLite database."""
+        """Load OHLCV data from SQLite database.
+
+        Args:
+            path: Path to the SQLite database file.
+            table: Table name. Must contain only alphanumeric characters and underscores.
+
+        Raises:
+            ValueError: If table name contains invalid characters.
+        """
+        import re
+        if not re.match(r'^[A-Za-z0-9_]+$', table):
+            raise ValueError(
+                f"Invalid table name '{table}': only alphanumeric characters "
+                f"and underscores are allowed."
+            )
         conn = sqlite3.connect(path)
         df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
         conn.close()
