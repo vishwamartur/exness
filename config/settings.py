@@ -384,3 +384,8 @@ BACKTEST_SPREAD_PIPS = float(os.getenv("BACKTEST_SPREAD_PIPS", 2.0))       # Def
 BACKTEST_SLIPPAGE_PIPS = float(os.getenv("BACKTEST_SLIPPAGE_PIPS", 0.5))   # Default slippage
 BACKTEST_INITIAL_EQUITY = float(os.getenv("BACKTEST_INITIAL_EQUITY", 10000.0))  # Starting equity
 BACKTEST_RISK_PERCENT = float(os.getenv("BACKTEST_RISK_PERCENT", 1.0))     # Risk per trade (%)
+
+# ─── Adaptive Signal Scoring ─────────────────────────────────────────────
+VOLUME_CONFIRMATION_MULTIPLIER = float(os.getenv("VOLUME_CONFIRMATION_MULTIPLIER", 1.5))  # Volume must exceed N x 20-period average for breakout confirmation
+SIGNAL_DECAY_CANDLES = int(os.getenv("SIGNAL_DECAY_CANDLES", 2))  # Cancel pending signals not filled within N candles (N * 5 min for M5)
+MTF_ALIGNMENT_REQUIRED = os.getenv("MTF_ALIGNMENT_REQUIRED", "True").lower() == "true"  # Require M5+M15+H1 agreement for max score
