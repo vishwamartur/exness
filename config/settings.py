@@ -413,3 +413,10 @@ SPREAD_QUALITY_MULTIPLIER = float(os.getenv("SPREAD_QUALITY_MULTIPLIER", 2.0))
 VOLATILITY_SPIKE_MULTIPLIER = float(os.getenv("VOLATILITY_SPIKE_MULTIPLIER", 3.0))
 ROUND_NUMBER_BUFFER_PIPS = int(os.getenv("ROUND_NUMBER_BUFFER_PIPS", 50))
 ROUND_NUMBER_INTERVAL = int(os.getenv("ROUND_NUMBER_INTERVAL", 50))
+
+# ─── Strategy Parameter Auto-Tuning ─────────────────────────────────────
+AUTO_TUNE_ENABLED = os.getenv("AUTO_TUNE_ENABLED", "False").lower() == "true"
+AUTO_TUNE_TRAIN_MONTHS = int(os.getenv("AUTO_TUNE_TRAIN_MONTHS", 3))
+AUTO_TUNE_TEST_MONTHS = int(os.getenv("AUTO_TUNE_TEST_MONTHS", 1))
+AUTO_TUNE_GUARDRAIL_PCT = float(os.getenv("AUTO_TUNE_GUARDRAIL_PCT", 0.2))
+AUTO_TUNE_MIN_OOS_SHARPE = float(os.getenv("AUTO_TUNE_MIN_OOS_SHARPE", 0.5))
